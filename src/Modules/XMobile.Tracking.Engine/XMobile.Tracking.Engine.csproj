@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <RootNamespace>XMobile.Tracking.Engine</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Deliberately dependency-free.
+
+    The engine is a pure function: evidence in, journey out. No I/O, no clock, no
+    randomness, no database, no HTTP. That is what makes it replayable over recorded
+    device traces in CI and re-runnable over any time window when late data arrives
+    (docs/03 §7). Adding a package here should be treated as a design change.
+  -->
+
+</Project>

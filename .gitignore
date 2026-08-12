@@ -1,0 +1,28 @@
+# .NET
+bin/
+obj/
+*.user
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+*.trx
+
+# Flutter / Dart (for when the app lands)
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+
+# Editors
+.vs/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local secrets — never commit
+appsettings.Local.json
+.env

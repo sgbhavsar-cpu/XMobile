@@ -1,0 +1,39 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{C77F73F2-411F-4B99-8E58-3EC1D5800862}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Modules", "Modules", "{7CF34524-4CCF-49F2-BDEE-B5A610C6389C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XMobile.Tracking.Engine", "src\Modules\XMobile.Tracking.Engine\XMobile.Tracking.Engine.csproj", "{1A4FACA2-D486-4768-A82B-539A9CB73C05}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{D9CA8479-5924-4B00-8D52-DBECAD564487}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XMobile.Tracking.Engine.Tests", "tests\XMobile.Tracking.Engine.Tests\XMobile.Tracking.Engine.Tests.csproj", "{41E54B71-CDEE-4F47-8EF1-789F606A6F76}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1A4FACA2-D486-4768-A82B-539A9CB73C05}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A4FACA2-D486-4768-A82B-539A9CB73C05}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A4FACA2-D486-4768-A82B-539A9CB73C05}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A4FACA2-D486-4768-A82B-539A9CB73C05}.Release|Any CPU.Build.0 = Release|Any CPU
+		{41E54B71-CDEE-4F47-8EF1-789F606A6F76}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41E54B71-CDEE-4F47-8EF1-789F606A6F76}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41E54B71-CDEE-4F47-8EF1-789F606A6F76}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41E54B71-CDEE-4F47-8EF1-789F606A6F76}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{7CF34524-4CCF-49F2-BDEE-B5A610C6389C} = {C77F73F2-411F-4B99-8E58-3EC1D5800862}
+		{1A4FACA2-D486-4768-A82B-539A9CB73C05} = {7CF34524-4CCF-49F2-BDEE-B5A610C6389C}
+		{41E54B71-CDEE-4F47-8EF1-789F606A6F76} = {D9CA8479-5924-4B00-8D52-DBECAD564487}
+	EndGlobalSection
+EndGlobal

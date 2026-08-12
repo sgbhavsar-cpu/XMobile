@@ -48,6 +48,7 @@ derivation, analytics, battery tuning from field telemetry.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
+| **BYOD with no MDM** — nothing can be enforced | Permissions and OEM settings are the rep's choice and can be revoked at any time; tracking coverage is structurally lower than on managed devices | Guided self-verifying setup, continuous health heartbeat, rep-first "tracking stopped, tap to fix" notifications, visible health score shared by rep and manager, engine designed to classify gaps rather than treat them as failures. **Set the expectation with the business that this ceiling exists** |
 | iOS background suspension produces sparse data | Wrong or missing transition times | Server-side inference designed for gaps from day one; corroborate with `CLVisit`, geofences, significant-location-change; back-estimate with `is_estimated` flags |
 | Android OEM battery killers stop the service | Silent tracking loss | Health heartbeat detects it, OEM-specific fix screens, manager-visible health score, foreground service + boot receiver |
 | Reps perceive tracking as surveillance | Sabotage: phone left at home, permissions revoked, adoption failure | Consent flow, work-hours-only collection, visible indicator, pause right, rep sees own data, flags-not-blocks policy. This is a change-management problem as much as a technical one |
@@ -92,6 +93,7 @@ derivation, analytics, battery tuning from field telemetry.
 | 21 | Opportunities | Full CRUD, linked to visits |
 | 22 | Order capture | Out of scope |
 | 23 | Visit proof | GPS + optional photos |
+| 24 | MDM | **Not in use** — nothing can be centrally enforced |
 
 ## 5. Open questions still outstanding
 
@@ -113,14 +115,25 @@ integration is written behind `IXInfoClient` with a stub. They do block Phase 3.
 11. **Rate tables** — does XInfo publish mileage and per-diem rates for us to sync, or do we
     maintain them in XMobile's admin? (Suggested amounts are only as good as these rates.)
 
-**One operational question left with you:** are devices enrolled in MDM? It does not change
-the design — the app self-diagnoses either way — but with MDM we can push the
-battery-optimisation exemption and `Always` location permission centrally instead of walking
-every rep through OEM settings screens, which is the difference between a smooth rollout and
-a hundred support calls.
+**MDM: confirmed not in use.** Every permission and OEM setting must therefore be obtained
+from the rep in-app and re-verified continuously. See
+[07 §3.3](07-flutter-app.md#33-tracking-health-and-onboarding-without-mdm) for the guided
+setup and health model, and the top row of §2 for the risk this carries.
 
-## 6. What I would build first, if you want a single next step
+## 6. Build status
 
-The journey engine with trace replay ([03 §10](03-tracking-and-journey.md#10-test-strategy-for-the-engine)).
-It is the highest-risk, highest-value component, it needs no UI, no XInfo and no network,
-and getting it right early prevents a rewrite of everything that consumes its output.
+**Phase 2's core is built.** The journey engine
+(`src/Modules/XMobile.Tracking.Engine`) is implemented as a pure function with 53 passing
+trace-replay tests covering the ordinary day, the four-day Pune→Nagpur tour, iOS sparse data,
+gap classification, anti-tamper, return-leg ambiguity, manual corrections and determinism.
+
+It was built first deliberately: highest risk, highest value, and it needs no UI, no XInfo and
+no network, so getting it right early prevents a rewrite of everything downstream. See
+[11 — Journey engine](11-journey-engine.md) for its structure, the defects the test suite
+caught, and its known limits.
+
+**Next**, in order:
+1. Ingest API + inference worker wrapping the engine (the imperative shell around the pure core).
+2. Flutter tracking client: collection profiles, dynamic geofence set, health heartbeat,
+   guided no-MDM onboarding.
+3. Phase 1 foundation work in parallel — it has no dependency on tracking.

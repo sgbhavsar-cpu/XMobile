@@ -56,6 +56,7 @@ CRM as the system of record for master data and back-office workflow.
 | [08 — Backend structure](docs/08-backend-structure.md) | .NET solution layout, modules, workers |
 | [09 — Deployment](docs/09-deployment.md) | docker-compose, sizing, backup, upgrade |
 | [10 — Roadmap](docs/10-roadmap.md) | Phasing, risks, open questions |
+| [11 — Journey engine](docs/11-journey-engine.md) | The built inference core: structure, defects the tests caught, known limits |
 
 ## Database
 
@@ -79,3 +80,18 @@ Ordered DDL in [`db/schema/`](db/schema/) — run in filename order.
 ## API
 
 OpenAPI 3.1 outline: [`api/openapi.yaml`](api/openapi.yaml).
+
+## Code
+
+```
+src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
+tests/XMobile.Tracking.Engine.Tests/     53 trace-replay tests
+```
+
+```bash
+dotnet test          # no database, no network, no device required
+```
+
+The journey engine is implemented: a pure `Infer(JourneyInput) → JourneyResult` with no
+dependencies, so the whole detection ruleset replays over recorded traces in CI. See
+[11 — Journey engine](docs/11-journey-engine.md).

@@ -90,13 +90,20 @@ abstract interface class LocationTrackingService {
 
 ## 3. Background execution
 
+> **No MDM.** Confirmed: devices are not centrally managed. Nothing can be enforced —
+> every permission and every OEM setting has to be obtained by persuading the rep, in the app,
+> and then continuously verified because they can be revoked at any time. This is the single
+> biggest determinant of tracking quality in the whole system, so it gets first-class
+> treatment rather than a help page (§3.3).
+
 ### Android
 - Foreground service with a persistent notification (`FOREGROUND_SERVICE_LOCATION`).
 - `ACCESS_BACKGROUND_LOCATION` requested with a clear rationale screen — Play policy
   requires it, and reps refuse the permission if the reason is not explained.
 - `RECEIVE_BOOT_COMPLETED` to restart tracking after reboot.
-- Battery-optimisation exemption requested via `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`;
-  for company-owned devices, set by MDM instead.
+- Battery-optimisation exemption requested via `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+  Without MDM this is a dialog the rep must accept, and the app must detect and re-ask when
+  it is later revoked.
 - OEM-specific guidance screen (Xiaomi/Oppo/Vivo/Realme autostart settings) triggered by
   manufacturer detection — this single screen prevents the most common "tracking stopped"
   support ticket.
@@ -109,10 +116,38 @@ abstract interface class LocationTrackingService {
 - `BGProcessingTask` for sync and uploads; opportunistic, never assumed.
 - Background modes: `location`, `fetch`, `processing`, `remote-notification`.
 
-### Tracking health screen
-A first-class feature, not a debug page: shows permission level, battery optimisation,
-power-saving state, last successful upload, queued items, and a plain-language fix for each
-problem. The rep sees the same score the manager sees, which turns an accusation into a checklist.
+### 3.3 Tracking health, and onboarding without MDM
+
+With no MDM, the app is the only enforcement mechanism there is, so this is a feature, not a
+debug page.
+
+**Guided setup at first login**, one screen per requirement, each verifying itself before
+advancing rather than assuming the rep tapped the right thing:
+
+1. Location permission → `Always` (Android 11+ forces this through a second, separate trip to
+   system settings; the screen has to explain why and hand-hold through it).
+2. Battery optimisation exemption.
+3. Notification permission (Android 13+) — without it the foreground-service notification is
+   hidden and some OEMs then treat the service as backgrounded.
+4. Manufacturer-specific autostart / "protected app" setting, shown only for the OEMs that
+   need it, with screenshots for that exact skin.
+5. Physical-activity permission for motion gating.
+
+**Continuous verification.** A heartbeat reports the live state of all five with every sync.
+Any regression raises a `tracking_health` notification to the rep first — "tracking has
+stopped, one tap to fix" — and only escalates to the manager's exception report if it stays
+broken. Reps get the chance to fix it before anyone is asked to explain it.
+
+**A visible score**, identical for rep and manager. When a manager asks about a gap, both are
+looking at the same checklist, which turns an accusation into a support conversation. It also
+means a rep who genuinely did everything right is demonstrably not at fault.
+
+**What this costs.** Expect a meaningful minority of devices to be misconfigured at any time,
+especially on Chinese OEM skins. The engine is built for that — gaps are classified, not
+treated as failures ([03 §5](03-tracking-and-journey.md#5-handling-gaps-the-normal-case-not-the-exception)) —
+but the honest expectation to set with the business is that BYOD without MDM produces lower
+tracking coverage than company-owned managed devices, and no amount of app engineering closes
+that gap entirely.
 
 ## 4. Sync engine
 
