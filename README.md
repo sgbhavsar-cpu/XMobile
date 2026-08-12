@@ -84,14 +84,21 @@ OpenAPI 3.1 outline: [`api/openapi.yaml`](api/openapi.yaml).
 ## Code
 
 ```
+app/                                     Flutter app (built, runs on mock backend)
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
 tests/XMobile.Tracking.Engine.Tests/     53 trace-replay tests
 ```
 
 ```bash
-dotnet test          # no database, no network, no device required
+dotnet test                    # 53 engine tests — no database, network or device
+cd app && flutter test         # 52 app tests — no device or emulator
 ```
 
-The journey engine is implemented: a pure `Infer(JourneyInput) → JourneyResult` with no
-dependencies, so the whole detection ruleset replays over recorded traces in CI. See
-[11 — Journey engine](docs/11-journey-engine.md).
+**Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
+the whole detection ruleset replays over recorded traces in CI.
+See [11 — Journey engine](docs/11-journey-engine.md).
+
+**Flutter app** — every screen and form, running against an in-memory backend that implements
+the same `ApiClient` contract the HTTP client will. Connecting to the real API is an override
+of one provider. Location capture, share-intent receipts and permission dialogs are entered
+manually for now; the manual paths stay afterwards as fallbacks. See [app/README](app/README.md).

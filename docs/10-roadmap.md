@@ -132,8 +132,15 @@ no network, so getting it right early prevents a rewrite of everything downstrea
 [11 — Journey engine](11-journey-engine.md) for its structure, the defects the test suite
 caught, and its known limits.
 
+**The Flutter app is built too** (`app/`), running against an in-memory backend: every screen,
+every form, offline queueing, the dynamic report engine, share-intent expense capture and the
+tracking-health flow. 52 tests, no device needed. Location capture, receipt sharing and
+permission dialogs are entered by hand until the plugins land — and the manual paths stay
+afterwards, because a rep whose GPS will not fix still has to record where they were.
+
 **Next**, in order:
-1. Ingest API + inference worker wrapping the engine (the imperative shell around the pure core).
-2. Flutter tracking client: collection profiles, dynamic geofence set, health heartbeat,
-   guided no-MDM onboarding.
-3. Phase 1 foundation work in parallel — it has no dependency on tracking.
+1. `HttpApiClient` — implement the existing `ApiClient` contract against the real endpoints.
+   One provider override swaps it in; no screen changes.
+2. Ingest API + inference worker wrapping the engine (the imperative shell around the pure core).
+3. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
+4. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.

@@ -26,3 +26,13 @@ build/
 # Local secrets — never commit
 appsettings.Local.json
 .env
+
+# Flutter app
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/ios/Pods/
+app/ios/.symlinks/
+app/android/.gradle/
+app/android/local.properties
