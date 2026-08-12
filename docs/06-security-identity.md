@@ -2,9 +2,11 @@
 
 ## 1. Identity
 
-Decision: **corporate AD/LDAP or OIDC**. Reference deployment uses Keycloak on-premise,
-federating the customer's AD/LDAP; installations that already run an OIDC provider point at
-it instead.
+Decision: **Keycloak deployed on-premise with the application**. There is no existing IdP to
+integrate with, so Keycloak is the identity provider, with LDAP federation available later if
+an AD appears. Deploying our own is an advantage here rather than a compromise: we control
+refresh-token lifetime, which is exactly what field devices need (see below), and a
+third-party IdP with a 24-hour refresh window would lock reps out on the second day of a tour.
 
 ```
 Flutter app ──(AppAuth, PKCE, system browser)──► Keycloak ──(LDAP federation)──► AD
@@ -113,7 +115,13 @@ time — a pattern of anomalies is meaningful in a way that a single anomaly is 
 
 ## 7. Push notifications
 
-FCM/APNs is the only external dependency. If the deployment forbids outbound internet:
+**Confirmed available:** outbound access to FCM/APNs is permitted, so push is enabled.
+Payloads remain notification-only (a type and an id) — no customer names, amounts or
+locations cross Google's or Apple's infrastructure.
+
+Push still cannot be *depended* on. Delivery is best-effort on both platforms, so every
+notification has a corresponding pull path; the notification only makes it timely. If the
+deployment ever forbids outbound internet:
 
 - notifications degrade to in-app polling on foreground;
 - nothing functional depends on push — it only accelerates plan changes, sync hints and

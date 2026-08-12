@@ -30,6 +30,8 @@ CREATE TYPE identity.user_status       AS ENUM ('ACTIVE','INACTIVE','SUSPENDED')
 CREATE TYPE identity.device_platform   AS ENUM ('ANDROID','IOS');
 
 CREATE TYPE customer.geo_source        AS ENUM ('NONE','GEOCODED','IMPORTED','FIELD_CAPTURED','VERIFIED');
+-- Reps may propose a new account from the field; XInfo approves it (docs/02 §2.6)
+CREATE TYPE customer.account_lifecycle AS ENUM ('PROSPECT','PENDING_APPROVAL','ACTIVE','REJECTED','INACTIVE');
 
 CREATE TYPE planning.tour_status       AS ENUM ('DRAFT','PLANNED','IN_PROGRESS','COMPLETED','CANCELLED','ABANDONED');
 CREATE TYPE planning.day_activity      AS ENUM ('TRAVEL','VISITS','MIXED','REST','LEAVE');
@@ -188,9 +190,13 @@ CREATE TABLE config.feature_flag (
 -- ---------------------------------------------------------------------
 -- Reference/lookup data (tables, not enums: operations edit these without a release)
 -- ---------------------------------------------------------------------
+-- i18n note: every reference table carries `name_i18n` ({"hi":"...","mr":"..."}) alongside the
+-- English `name`. The app resolves the active locale and falls back to `name`. Shipping English
+-- first is then a content task, not a schema change (docs/07 §10).
 CREATE TABLE config.visit_type (
     code             text PRIMARY KEY,
     name             text NOT NULL,
+    name_i18n        jsonb NOT NULL DEFAULT '{}'::jsonb,
     default_duration_min smallint NOT NULL DEFAULT 45,
     requires_selfie  boolean NOT NULL DEFAULT false,
     requires_signature boolean NOT NULL DEFAULT false,
@@ -206,6 +212,7 @@ CREATE TABLE config.visit_type (
 CREATE TABLE config.visit_outcome (
     code        text PRIMARY KEY,
     name        text NOT NULL,
+    name_i18n   jsonb NOT NULL DEFAULT '{}'::jsonb,
     is_positive boolean NOT NULL DEFAULT true,
     requires_follow_up boolean NOT NULL DEFAULT false,
     sort_order  smallint NOT NULL DEFAULT 0,
@@ -219,6 +226,7 @@ CREATE TABLE config.reason_code (
     domain      text NOT NULL,          -- VISIT_SKIP / TRACKING_PAUSE / OUT_OF_GEOFENCE / TOUR_ABANDON
     code        text NOT NULL,
     name        text NOT NULL,
+    name_i18n   jsonb NOT NULL DEFAULT '{}'::jsonb,
     requires_remark boolean NOT NULL DEFAULT false,
     sort_order  smallint NOT NULL DEFAULT 0,
     is_active   boolean NOT NULL DEFAULT true,
@@ -228,7 +236,27 @@ CREATE TABLE config.reason_code (
     PRIMARY KEY (domain, code)
 );
 
+-- Opportunity pipeline stages (configurable: every business names them differently)
+CREATE TABLE config.opportunity_stage (
+    code            text PRIMARY KEY,
+    name            text NOT NULL,
+    name_i18n       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    probability_pct smallint NOT NULL DEFAULT 0 CHECK (probability_pct BETWEEN 0 AND 100),
+    is_won          boolean NOT NULL DEFAULT false,
+    is_lost         boolean NOT NULL DEFAULT false,
+    is_open         boolean GENERATED ALWAYS AS (NOT is_won AND NOT is_lost) STORED,
+    requires_reason boolean NOT NULL DEFAULT false,   -- e.g. LOST needs a reason
+    xinfo_code      text,
+    sort_order      smallint NOT NULL DEFAULT 0,
+    is_active       boolean NOT NULL DEFAULT true,
+    row_version     bigint NOT NULL DEFAULT 0,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_stage_outcome CHECK (NOT (is_won AND is_lost))
+);
+
 -- Reference data is part of the offline working set, so it rides the change feed too.
-SELECT config.fn_make_syncable('config.visit_type',    '-', '-', 'code');
-SELECT config.fn_make_syncable('config.visit_outcome', '-', '-', 'code');
-SELECT config.fn_make_syncable('config.reason_code',   '-', '-', 'domain||code');
+SELECT config.fn_make_syncable('config.visit_type',        '-', '-', 'code');
+SELECT config.fn_make_syncable('config.visit_outcome',     '-', '-', 'code');
+SELECT config.fn_make_syncable('config.reason_code',       '-', '-', 'domain||code');
+SELECT config.fn_make_syncable('config.opportunity_stage', '-', '-', 'code');

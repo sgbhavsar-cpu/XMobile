@@ -20,6 +20,15 @@ CREATE TABLE customer.customer_account (
     phone            text,
     email            text,
     is_active        boolean NOT NULL DEFAULT true,
+    -- Field-proposed accounts: a rep can capture a prospect and visit it immediately;
+    -- XInfo approves it into a real customer and returns its id (docs/02 §2.6).
+    lifecycle_status customer.account_lifecycle NOT NULL DEFAULT 'ACTIVE',
+    is_field_created boolean NOT NULL DEFAULT false,
+    created_by_user_id uuid REFERENCES identity.app_user(id),
+    proposed_at      timestamptz,
+    approved_at      timestamptz,
+    rejected_at      timestamptz,
+    rejection_reason text,
     xinfo_synced_at  timestamptz,
     xinfo_hash       text,                         -- for full-pull change detection
     row_version      bigint NOT NULL DEFAULT 0,
@@ -30,6 +39,8 @@ CREATE TABLE customer.customer_account (
 CREATE INDEX ix_account_owner  ON customer.customer_account (owner_user_id) WHERE deleted_at IS NULL;
 CREATE INDEX ix_account_org    ON customer.customer_account (org_unit_id);
 CREATE INDEX ix_account_name_trgm ON customer.customer_account USING gin (name gin_trgm_ops);
+CREATE INDEX ix_account_pending ON customer.customer_account (proposed_at)
+    WHERE lifecycle_status IN ('PROSPECT','PENDING_APPROVAL') AND deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------
 -- Sites: the geo-bearing entity. Visits and geofences reference a SITE,
@@ -113,6 +124,90 @@ CREATE INDEX ix_assignment_user     ON customer.customer_assignment (user_id) WH
 CREATE INDEX ix_assignment_customer ON customer.customer_assignment (customer_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX ux_assignment_active ON customer.customer_assignment (customer_id, user_id, role)
     WHERE valid_to IS NULL AND deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Opportunities (pipeline). Two-way synced with XInfo: the rep may create
+-- one in the field and may edit stage, value and expected close date.
+-- Conflict rule is field-level, not whole-row (docs/04 §4).
+-- ---------------------------------------------------------------------
+CREATE TABLE customer.opportunity (
+    id                uuid PRIMARY KEY,                  -- client-generated UUIDv7 when field-created
+    xinfo_id          text UNIQUE,
+    customer_id       uuid NOT NULL REFERENCES customer.customer_account(id),
+    site_id           uuid REFERENCES customer.customer_site(id),
+    contact_id        uuid REFERENCES customer.customer_contact(id),
+    owner_user_id     uuid REFERENCES identity.app_user(id),
+    title             text NOT NULL,
+    description       text,
+    stage_code        text NOT NULL REFERENCES config.opportunity_stage(code),
+    estimated_value   numeric(14,2),
+    currency          char(3) NOT NULL DEFAULT 'INR',
+    probability_pct   smallint CHECK (probability_pct BETWEEN 0 AND 100),
+    expected_close_date date,
+    source            text,                              -- FIELD / CAMPAIGN / INBOUND / REFERRAL
+    competitor        text,
+    -- outcome
+    closed_at         timestamptz,
+    close_reason_code text,
+    close_remark      text,
+    actual_value      numeric(14,2),
+    -- provenance / two-way sync bookkeeping
+    is_field_created  boolean NOT NULL DEFAULT false,
+    created_by_user_id uuid REFERENCES identity.app_user(id),
+    -- fields XMobile owns (rep edits win); everything else is XInfo's
+    rep_fields_updated_at timestamptz,
+    xinfo_synced_at   timestamptz,
+    pushed_at         timestamptz,
+    row_version       bigint NOT NULL DEFAULT 0,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now(),
+    deleted_at        timestamptz
+);
+CREATE INDEX ix_opportunity_customer ON customer.opportunity (customer_id) WHERE deleted_at IS NULL;
+CREATE INDEX ix_opportunity_owner    ON customer.opportunity (owner_user_id) WHERE deleted_at IS NULL;
+CREATE INDEX ix_opportunity_stage    ON customer.opportunity (stage_code);
+CREATE INDEX ix_opportunity_close    ON customer.opportunity (expected_close_date)
+    WHERE closed_at IS NULL AND deleted_at IS NULL;
+
+CREATE TABLE customer.opportunity_stage_history (
+    id             bigserial PRIMARY KEY,
+    opportunity_id uuid NOT NULL REFERENCES customer.opportunity(id) ON DELETE CASCADE,
+    from_stage     text,
+    to_stage       text NOT NULL,
+    changed_at     timestamptz NOT NULL DEFAULT now(),
+    changed_by     uuid REFERENCES identity.app_user(id),
+    visit_id       uuid,                                 -- which visit moved it (FK added in 05)
+    reason         text,
+    value_before   numeric(14,2),
+    value_after    numeric(14,2)
+);
+CREATE INDEX ix_opp_history ON customer.opportunity_stage_history (opportunity_id, changed_at DESC);
+
+-- ---------------------------------------------------------------------
+-- Sales history pulled from XInfo, read-only, so the rep can discuss
+-- trends offline. Rolling window only — this is a cache, not a ledger.
+-- ---------------------------------------------------------------------
+CREATE TABLE customer.sales_history (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    customer_id    uuid NOT NULL REFERENCES customer.customer_account(id),
+    xinfo_id       text UNIQUE,
+    document_type  text NOT NULL DEFAULT 'ORDER' CHECK (document_type IN ('ORDER','INVOICE','RETURN')),
+    document_no    text,
+    document_date  date NOT NULL,
+    amount         numeric(14,2) NOT NULL,
+    currency       char(3) NOT NULL DEFAULT 'INR',
+    quantity       numeric(14,3),
+    uom            text,
+    status         text,
+    summary        text,                                 -- 'Product A x12, Product B x4'
+    synced_at      timestamptz NOT NULL DEFAULT now(),
+    row_version    bigint NOT NULL DEFAULT 0,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    deleted_at     timestamptz
+);
+CREATE INDEX ix_sales_history_customer ON customer.sales_history (customer_id, document_date DESC)
+    WHERE deleted_at IS NULL;
 
 -- ---------------------------------------------------------------------
 -- Geofence registry: one row per monitorable place (home or customer site).
@@ -205,3 +300,5 @@ SELECT config.fn_make_syncable('customer.customer_site',       '-', 'customer_id
 SELECT config.fn_make_syncable('customer.customer_contact',    '-', 'customer_id');
 SELECT config.fn_make_syncable('customer.customer_assignment', 'user_id', 'customer_id');
 SELECT config.fn_make_syncable('customer.geofence',            '-', '-');
+SELECT config.fn_make_syncable('customer.opportunity',         'owner_user_id', 'customer_id');
+SELECT config.fn_make_syncable('customer.sales_history',       '-', 'customer_id');

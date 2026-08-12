@@ -27,15 +27,15 @@ fresh deployment is bootstrapped automatically.
 |---|---|
 | `00_extensions.sql` | Extensions, schemas, enum types, change-feed machinery, config + reference tables |
 | `01_identity_org.sql` | Org units, users, roles, devices, home locations, leave, consent |
-| `02_customer.sql` | Accounts, sites, contacts, assignment, geofence registry + sync triggers |
+| `02_customer.sql` | Accounts (incl. field-proposed prospects), sites, contacts, assignment, opportunities + stage history, sales history, geofence registry |
 | `03_planning.sql` | Tours, tour days, visit plans, plan revisions, route suggestions |
 | `04_tracking.sql` | Sessions, pings (partitioned), geofence events, journey events/segments, anomalies, rollups |
-| `05_visit_report.sql` | Visits, form templates, reports, amendments, attachments link |
-| `06_expense.sql` | Attachments, OCR, categories, mileage rates, expenses, share inbox |
+| `05_visit_report.sql` | Visits, form templates, reports, amendments, attachment and opportunity links |
+| `06_expense.sql` | Attachments, OCR, categories, mileage/per-diem rates, city tiers, expenses, share inbox |
 | `07_sync.sql` | Client mutations, conflicts, device cursors, sync policy, retention rules |
 | `08_integration.sql` | Outbox, inbound runs, entity/code maps, reconciliation, audit, notifications |
-| `09_views.sql` | Dashboard views, scope helpers, site matching, radius suggestion, duplicate probe |
-| `10_seed.sql` | Roles, visit types, outcomes, reason codes, expense categories, tuning defaults, a sample form template |
+| `09_views.sql` | Dashboard views, customer 360, open pipeline, scope helpers, site matching, radius and mileage suggestion, duplicate probe |
+| `10_seed.sql` | Roles, visit types, outcomes, opportunity stages, reason codes, expense categories, rates, city tiers, tuning defaults, a sample form template |
 
 ## Conventions
 

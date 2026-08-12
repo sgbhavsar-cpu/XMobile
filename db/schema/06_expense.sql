@@ -75,6 +75,7 @@ CREATE INDEX ix_ocr_attachment ON expense.ocr_extraction (attachment_id);
 CREATE TABLE expense.expense_category (
     code              text PRIMARY KEY,
     name              text NOT NULL,
+    name_i18n         jsonb NOT NULL DEFAULT '{}'::jsonb,
     parent_code       text REFERENCES expense.expense_category(code),
     requires_receipt  boolean NOT NULL DEFAULT true,
     receipt_threshold numeric(14,2),          -- receipt required above this amount only
@@ -91,6 +92,12 @@ CREATE TABLE expense.expense_category (
     updated_at        timestamptz NOT NULL DEFAULT now()
 );
 
+-- ---------------------------------------------------------------------
+-- Rate tables. These drive SUGGESTED amounts only — XInfo recomputes and
+-- decides authoritatively (docs/05 §5). They are synced down to the device
+-- so a rep offline still sees an indicative figure, labelled as such.
+-- ---------------------------------------------------------------------
+
 -- Mileage rates by mode and grade (used to pre-fill distance-based claims)
 CREATE TABLE expense.mileage_rate (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -105,6 +112,33 @@ CREATE TABLE expense.mileage_rate (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_mileage_lookup ON expense.mileage_rate (travel_mode, grade, effective_from DESC);
+
+-- Per-diem (daily allowance) rates by grade and city tier
+CREATE TABLE expense.per_diem_rate (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    grade          text,
+    city_tier      text CHECK (city_tier IN ('METRO','TIER1','TIER2','TIER3','OTHER')),
+    full_day_rate  numeric(10,2) NOT NULL,
+    half_day_rate  numeric(10,2),
+    travel_day_rate numeric(10,2),          -- a day spent entirely in transit
+    lodging_cap    numeric(10,2),
+    currency       char(3) NOT NULL DEFAULT 'INR',
+    effective_from date NOT NULL,
+    effective_to   date,
+    row_version    bigint NOT NULL DEFAULT 0,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_per_diem_lookup ON expense.per_diem_rate (grade, city_tier, effective_from DESC);
+
+-- Which city is which tier (drives per-diem lookup); seeded and admin-editable
+CREATE TABLE expense.city_tier (
+    city        text PRIMARY KEY,
+    state       text,
+    tier        text NOT NULL CHECK (tier IN ('METRO','TIER1','TIER2','TIER3','OTHER')),
+    row_version bigint NOT NULL DEFAULT 0,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
 
 -- ---------------------------------------------------------------------
 -- Expenses
@@ -132,6 +166,12 @@ CREATE TABLE expense.expense (
     distance_km       numeric(10,2),
     distance_source   text CHECK (distance_source IN ('MANUAL','TRACKED','ESTIMATED')),
     rate_per_km       numeric(10,2),
+
+    -- Indicative amount computed locally from the synced rate tables. XInfo recomputes
+    -- and decides; if the two differ the rep sees XInfo's number, not this one.
+    suggested_amount  numeric(14,2),
+    suggested_basis   jsonb NOT NULL DEFAULT '{}'::jsonb,  -- {"rateId":"...","km":412,"rate":9.00}
+    amount_is_suggested boolean NOT NULL DEFAULT false,    -- rep accepted the suggestion unchanged
 
     -- capture provenance
     capture_source    expense.capture_source NOT NULL DEFAULT 'MANUAL',
@@ -207,3 +247,5 @@ SELECT config.fn_make_syncable('expense.attachment',        'owner_user_id', '-'
 SELECT config.fn_make_syncable('expense.share_inbox_item',  'user_id', '-');
 SELECT config.fn_make_syncable('expense.expense_category',  '-', '-', 'code');
 SELECT config.fn_make_syncable('expense.mileage_rate',      '-', '-');
+SELECT config.fn_make_syncable('expense.per_diem_rate',     '-', '-');
+SELECT config.fn_make_syncable('expense.city_tier',         '-', '-', 'city');

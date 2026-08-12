@@ -91,9 +91,15 @@ Secrets come from Docker secrets or the customer's vault — never from the comp
 
 ## 3. Sizing
 
+**Target for this deployment: under 100 reps** — the first row below. At that size a single
+API and a single worker container are sufficient, and **Redis is optional**: the ingest queue
+can be an in-process `System.Threading.Channels` channel. The reference stack keeps Redis
+because it costs little and removes a rewrite if the fleet grows, but an installation that
+wants fewer moving parts can drop it by changing one DI registration.
+
 | Reps | API | Worker | Postgres | Storage/year |
 |---|---|---|---|---|
-| ≤ 100 | 1 × (2 vCPU, 2 GB) | 1 × (2 vCPU, 2 GB) | 4 vCPU, 8 GB | ~30 GB DB + ~60 GB attachments |
+| **≤ 100 (target)** | 1 × (2 vCPU, 2 GB) | 1 × (2 vCPU, 2 GB) | 4 vCPU, 8 GB | ~30 GB DB + ~60 GB attachments |
 | 100–500 | 2 × (2 vCPU, 4 GB) | 1 × (4 vCPU, 4 GB) | 8 vCPU, 16 GB, SSD | ~120 GB DB + ~250 GB attachments |
 | 500–2000 | 3–4 × (4 vCPU, 4 GB) | 2 × (4 vCPU, 8 GB) | 16 vCPU, 32 GB, NVMe + replica | ~450 GB DB + ~1 TB attachments |
 

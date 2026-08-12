@@ -20,6 +20,9 @@ What the device holds, governed by `sync_policy` (per role, editable in admin):
 | Entity | Default window |
 |---|---|
 | Assigned customer accounts + sites + contacts | All assigned, no time limit |
+| Opportunities (own + assigned customers') | All open + closed in the last 180 days |
+| Sales history | Rolling 365 days per assigned customer |
+| Rate tables (mileage, per-diem, city tier) | All active |
 | Tours + tour days + visit plans | `back_days` 90, `forward_days` 30 |
 | Visits + reports (own) | `back_days` 90 |
 | Expenses (own) | `back_days` 180 |
@@ -126,7 +129,12 @@ prevents a thundering herd when connectivity returns to a whole region at once.
 | Entity | Policy | Rationale |
 |---|---|---|
 | `customer_account`, `customer_site`, `customer_contact` | **Server wins**, always | XInfo is master; client edits are proposals |
+| `customer_account` in `PROSPECT`/`PENDING_APPROVAL` | **Client wins** until approved | Field-created; XInfo has nothing to overwrite it with yet |
+| New site / contact on an existing account | **Client wins** on insert, server wins thereafter | Created in the field, then owned by XInfo |
 | Site geo capture (`FIELD_CAPTURED`) | **Client wins** if newer and more trusted source | Field capture beats geocode |
+| `opportunity` | **Field-level merge**: rep owns `stage_code`, `estimated_value`, `expected_close_date`, `probability_pct`, close fields; XInfo owns ownership, customer/site linkage, ids | The only genuinely two-way entity — both sides legitimately edit, but different fields |
+| `sales_history` | **Server wins**, read-only on the device | A cache of XInfo's ledger |
+| Rate tables (`mileage_rate`, `per_diem_rate`, `city_tier`) | Server wins | Policy config |
 | `tour`, `tour_day` | Server wins if the tour was changed by a manager; else last-write-wins on `updated_at` | Manager reassignment must stick |
 | `visit_plan` | Field-level merge: rep owns `seq`/`status`/`skip_reason`; manager owns assignment | Both edit legitimately, different fields |
 | `visit` (check-in/out) | **Client wins**, immutable after `REPORT_SUBMITTED` | Only the device was there |

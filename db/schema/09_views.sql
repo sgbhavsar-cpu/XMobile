@@ -153,6 +153,61 @@ SELECT p.id, p.user_id, p.paused_at::date, 'TRACKING_PAUSE', 'LOW',
 FROM   tracking.tracking_pause p;
 
 -- ---------------------------------------------------------------------
+-- Customer 360: what the rep sees before walking in (all offline-cached)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE VIEW customer.v_customer_360 AS
+SELECT c.id AS customer_id,
+       c.name,
+       c.lifecycle_status,
+       c.category,
+       (SELECT count(*) FROM customer.customer_site s
+         WHERE s.customer_id = c.id AND s.deleted_at IS NULL)                AS site_count,
+       (SELECT max(v.check_in_at) FROM visit.visit v
+         WHERE v.customer_id = c.id AND v.deleted_at IS NULL)                AS last_visit_at,
+       (SELECT count(*) FROM visit.visit v
+         WHERE v.customer_id = c.id AND v.deleted_at IS NULL
+           AND v.check_in_at > now() - interval '90 days')                   AS visits_90d,
+       (SELECT COALESCE(sum(sh.amount),0) FROM customer.sales_history sh
+         WHERE sh.customer_id = c.id AND sh.deleted_at IS NULL
+           AND sh.document_type = 'ORDER'
+           AND sh.document_date > CURRENT_DATE - 365)                        AS sales_12m,
+       (SELECT max(sh.document_date) FROM customer.sales_history sh
+         WHERE sh.customer_id = c.id AND sh.deleted_at IS NULL)              AS last_order_date,
+       (SELECT count(*) FROM customer.opportunity o
+         JOIN config.opportunity_stage st ON st.code = o.stage_code
+         WHERE o.customer_id = c.id AND o.deleted_at IS NULL AND st.is_open) AS open_opportunities,
+       (SELECT COALESCE(sum(o.estimated_value),0) FROM customer.opportunity o
+         JOIN config.opportunity_stage st ON st.code = o.stage_code
+         WHERE o.customer_id = c.id AND o.deleted_at IS NULL AND st.is_open) AS open_pipeline_value
+FROM   customer.customer_account c
+WHERE  c.deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Pipeline view: open opportunities with age and staleness
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE VIEW customer.v_open_pipeline AS
+SELECT o.id                AS opportunity_id,
+       o.customer_id,
+       c.name              AS customer_name,
+       o.owner_user_id,
+       o.title,
+       o.stage_code,
+       st.name             AS stage_name,
+       st.probability_pct  AS stage_probability,
+       o.estimated_value,
+       o.expected_close_date,
+       (o.expected_close_date < CURRENT_DATE)                      AS is_overdue,
+       EXTRACT(day FROM (now() - o.created_at))::integer           AS age_days,
+       (SELECT max(v.check_in_at) FROM visit.visit_opportunity vo
+         JOIN visit.visit v ON v.id = vo.visit_id
+        WHERE vo.opportunity_id = o.id)                            AS last_touched_at,
+       o.is_field_created
+FROM   customer.opportunity o
+JOIN   config.opportunity_stage st ON st.code = o.stage_code
+JOIN   customer.customer_account c ON c.id = o.customer_id
+WHERE  o.deleted_at IS NULL AND st.is_open;
+
+-- ---------------------------------------------------------------------
 -- Helper: nearest customer site to a point (site matching during inference)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION customer.fn_match_site(p_point geography, p_user_id uuid, p_max_m integer DEFAULT 500)
@@ -193,6 +248,40 @@ $$;
 -- ---------------------------------------------------------------------
 -- Expense duplicate probe (image hash OR same amount/date/merchant)
 -- ---------------------------------------------------------------------
+-- ---------------------------------------------------------------------
+-- Suggested mileage amount from tracked distance (indicative only —
+-- XInfo recomputes authoritatively; docs/05 §5)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION expense.fn_suggest_mileage(p_user_id uuid, p_date date)
+RETURNS TABLE (distance_km numeric, estimated_km numeric, travel_mode tracking.travel_mode,
+               rate_per_km numeric, suggested_amount numeric)
+LANGUAGE sql STABLE AS $$
+    WITH seg AS (
+        SELECT s.travel_mode,
+               sum(s.distance_m) FILTER (WHERE NOT s.is_estimated) / 1000.0 AS tracked_km,
+               sum(s.distance_m) FILTER (WHERE s.is_estimated)     / 1000.0 AS est_km
+        FROM   tracking.journey_segment s
+        WHERE  s.user_id = p_user_id
+          AND  s.local_date = p_date
+          AND  s.superseded_by_id IS NULL
+          AND  s.segment_type IN ('OUTBOUND_TRAVEL','INTER_TRAVEL','RETURN_TRAVEL')
+          AND  s.travel_mode IN ('CAR','TWO_WHEELER')     -- only own-vehicle modes are claimable per km
+        GROUP  BY s.travel_mode
+    )
+    SELECT round(COALESCE(seg.tracked_km,0)::numeric, 2),
+           round(COALESCE(seg.est_km,0)::numeric, 2),
+           seg.travel_mode,
+           r.rate_per_km,
+           round((COALESCE(seg.tracked_km,0) + COALESCE(seg.est_km,0))::numeric * r.rate_per_km, 2)
+    FROM   seg
+    LEFT   JOIN LATERAL (
+            SELECT mr.rate_per_km FROM expense.mileage_rate mr
+            WHERE  mr.travel_mode = seg.travel_mode
+              AND  mr.effective_from <= p_date
+              AND  (mr.effective_to IS NULL OR mr.effective_to >= p_date)
+            ORDER  BY mr.effective_from DESC LIMIT 1) r ON true;
+$$;
+
 CREATE OR REPLACE FUNCTION expense.fn_find_duplicates(p_expense_id uuid)
 RETURNS TABLE (candidate_id uuid, score numeric, reason text)
 LANGUAGE sql STABLE AS $$

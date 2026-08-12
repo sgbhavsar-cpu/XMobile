@@ -20,15 +20,27 @@ CRM as the system of record for master data and back-office workflow.
 | Question | Decision |
 |---|---|
 | Scale / deployment | On-premise, self-hosted; no cloud-managed dependencies except FCM/APNs |
+| Fleet size | **Under 100 reps** — single API + single worker; Redis optional at this size |
 | Platforms | Android **and** iOS, mixed company-owned / BYOD → tracking must tolerate sparse data |
 | Tracking window | Hybrid: auto-starts on scheduled duty/tour days; rep may pause with a logged reason |
 | Trip model | **Tour** (multi-day container) with optional editable per-day sub-plans |
+| Tour approval | **Self-service** — no approval gate; manager reviews plan-vs-actual afterwards |
 | Expenses | **Capture only** — XInfo owns approval, settlement and reimbursement |
+| Money math | App shows **indicative** mileage/per-diem from synced rates; XInfo decides finally |
 | Master data | XInfo owns customers; XMobile syncs down and pushes visits/journeys/expenses up |
+| Field-created customers | Rep proposes a **prospect** (visitable at once, XInfo approves); sites and contacts created directly |
+| Opportunities | Full CRUD in the app, linked to visits — the one **two-way** synced entity |
+| Sales history | Pulled from XInfo, read-only rolling window, visible offline |
+| Orders / catalogue | **Out of scope** — orders stay in XInfo |
 | Integration | REST API both directions, transactional outbox + idempotency keys |
-| Identity | Corporate AD/LDAP or OIDC; org hierarchy synced from XInfo |
+| Identity | **Keycloak deployed with the app** (LDAP federation available later) |
 | Offline | Full offline for the rep's working set, with an admin-tunable sync window |
 | Visit report | Fixed core fields + admin-defined dynamic extension section (versioned templates) |
+| Visit proof | **GPS + dwell**; photos optional and rep-chosen, no mandatory selfie |
+| Attendance | Derived from journey data, **information only** — not the payroll record |
+| Push | FCM/APNs permitted; notification-only payloads, never depended on |
+| Localisation | Multi-language structure built in (`name_i18n`, label maps); **English ships first** |
+| Geography | India today, kept timezone- and locale-flexible |
 
 ## Documentation
 

@@ -194,7 +194,48 @@ Design notes that matter in practice:
    say so explicitly rather than failing silently.
 5. The "Sync issues" inbox is reachable in two taps from home.
 
-## 9. Testing
+## 9. Opportunities in the app
+
+Because opportunities are creatable and editable in the field, they get first-class screens:
+
+- **Before the call:** the customer screen shows open opportunities with stage, value and
+  expected close date, alongside recent order history and past visit reports — the three
+  things a rep wants in their hand walking in.
+- **During/after the call:** the visit report screen lists the customer's open opportunities
+  with a one-tap "discussed this" toggle; tapping through allows a stage change, value edit
+  or close with reason. Each change writes a `visit_opportunity` link and a
+  `opportunity_stage_history` row, so the pipeline movement is attributable to a visit.
+- **Creating one:** available from the customer screen and from the visit report, needing
+  only title, stage, estimated value and expected close date.
+- **Offline:** fully editable offline; only the rep-owned fields are sent, so a XInfo-side
+  ownership change does not collide with the rep's stage edit.
+
+## 10. Localisation
+
+Full multi-language structure, English shipped first:
+
+- App strings in ARB files (`flutter_localizations` + `intl`), no hardcoded user-facing text —
+  enforced by a lint rule so it cannot rot.
+- Reference data carries `name_i18n` (`{"hi":"बिक्री कॉल","mr":"..."}`); the app resolves the
+  active locale and falls back to the English `name`. Adding Marathi later is a content task.
+- Form templates carry the same label-map shape per field, so a template author can localise
+  questions without a release.
+- Locale is per-user, changeable in settings, and stored with the report so it is auditable.
+
+**OCR script coverage — a real constraint.** Google ML Kit on-device text recognition covers
+Latin, Devanagari, Chinese, Japanese and Korean. It does **not** cover Tamil, Telugu,
+Kannada, Malayalam or Gujarati. The design therefore:
+
+1. runs ML Kit on-device by default (covers English and Hindi receipts, which is the bulk);
+2. falls back to server-side OCR (Tesseract with the relevant `tessdata` language packs) when
+   confidence is low or the script is unsupported — the file is already uploading anyway;
+3. never blocks expense capture on OCR. Extraction failing means the rep types the amount;
+   it does not mean the expense cannot be recorded.
+
+Most receipts are numeric and Latin regardless of the rep's language, so this matters less
+in practice than it sounds — but it should be a known limitation, not a surprise in UAT.
+
+## 11. Testing
 
 - Unit: repositories, sync engine, form validation, OCR field extraction, geo maths.
 - Widget: check-in flow, expense capture from share intent, dynamic form rendering.

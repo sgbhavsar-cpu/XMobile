@@ -126,11 +126,66 @@ competitor mentioned, contact met, sentiment.
 A report always stores the version it was captured against, so historical reports render
 correctly years later.
 
-### 2.5 Expense
+### 2.5 Opportunity
+
+The pipeline entity, and the only **two-way synced** business object in the system.
+A rep can create one in the field, edit its stage, value and expected close date, and link
+it to the visits that moved it.
+
+- `customer.opportunity` is keyed by a client-generated UUIDv7 when field-created, and
+  carries `xinfo_id` once XInfo knows about it.
+- Stages live in `config.opportunity_stage` (configurable — every business names them
+  differently), each with a probability, `is_won`/`is_lost` flags and an optional
+  reason requirement.
+- `visit.visit_opportunity` is a many-to-many link: one call frequently covers several open
+  deals, and recording only one of them loses the others.
+- `customer.opportunity_stage_history` records every stage and value movement with the visit
+  that caused it — which is what turns visit reports into pipeline analytics instead of prose.
+
+**Conflict rule is field-level, not whole-row.** The rep owns `stage_code`,
+`estimated_value`, `expected_close_date`, `probability_pct` and the close fields; XInfo owns
+`owner_user_id`, `customer_id`, `site_id` and its own identifiers. `rep_fields_updated_at`
+records when the rep last touched their half, so a XInfo pull can refresh its own fields
+without stamping on an edit the rep made an hour ago in a basement with no signal.
+
+### 2.6 Field-created customers (prospects)
+
+A rep meeting a new prospect has to be able to record a visit today, but reps writing
+directly into the CRM master fills it with duplicates. So:
+
+```
+rep captures prospect  →  lifecycle_status = PROSPECT   (visitable immediately, local id)
+       ↓ pushed to XInfo as a proposal
+PENDING_APPROVAL  →  approved in XInfo  →  ACTIVE  (xinfo_id mapped in, id unchanged locally)
+                  →  rejected           →  REJECTED (with reason, visits retained)
+```
+
+The local UUID never changes when XInfo approves — only `xinfo_id` is filled in — so visits
+and opportunities recorded against a prospect stay attached with no id rewriting.
+
+**Sites and contacts are different.** A new branch, warehouse or contact person on an
+*existing* account is created directly and pushed up without an approval gate. These change
+constantly in the field, and gating them just means reps stop recording them.
+
+### 2.7 Sales history
+
+`customer.sales_history` is a read-only, rolling-window cache of orders and invoices pulled
+from XInfo, so the rep can discuss trends offline. It is a cache, not a ledger: never edited
+here, never authoritative, and purged outside its window. The 12-month totals in
+`customer.v_customer_360` are computed from it.
+
+### 2.8 Expense
 
 Capture-only. The local row is authoritative until pushed; after `PUSHED` it becomes
 read-only in XMobile and any correction must be a new entry or a XInfo-side edit that flows
 back as status.
+
+**Suggested amounts.** For mileage and per-diem the app computes an *indicative* figure from
+synced, effective-dated rate tables (`expense.mileage_rate`, `expense.per_diem_rate`,
+`expense.city_tier`) and stores it in `suggested_amount` with its basis in
+`suggested_basis`. XInfo recomputes authoritatively; where the two differ, the rep is shown
+XInfo's number. The UI must label the local figure as indicative — a suggestion presented as
+a promise is how you generate expense disputes.
 
 **States:** `DRAFT → SUBMITTED → PUSHED → ACKNOWLEDGED` and `PUSH_FAILED` (retryable).
 XInfo's own approval status is mirrored back into `xinfo_status` for the rep to see, but

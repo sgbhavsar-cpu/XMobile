@@ -16,14 +16,29 @@ INSERT INTO identity.app_role (code, name, description, permissions) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- ---------------------------------------------------------------------
-INSERT INTO config.visit_type (code, name, default_duration_min, requires_selfie, allows_remote, sort_order) VALUES
- ('SALES_CALL',   'Sales call',            45, false, false, 10),
- ('COLLECTION',   'Payment collection',    30, false, false, 20),
- ('SERVICE',      'Service / complaint',   60, true,  false, 30),
- ('DEMO',         'Product demonstration', 90, true,  false, 40),
- ('NEW_PROSPECT', 'New prospect',          45, true,  false, 50),
- ('COURTESY',     'Courtesy / relationship',30,false, false, 60),
- ('REMOTE_CALL',  'Telephonic / online',   20, false, true,  70)
+-- Visit proof policy: GPS + dwell is the proof; photos are optional and rep-chosen.
+-- requires_selfie stays false everywhere by default — it is available per visit type if a
+-- specific process ever needs it, but mandating it is the most resented feature in field
+-- apps and roughly quadruples attachment volume (docs/02 §2.2).
+INSERT INTO config.visit_type (code, name, name_i18n, default_duration_min, requires_selfie, allows_remote, sort_order) VALUES
+ ('SALES_CALL',   'Sales call',             '{"hi":"बिक्री कॉल"}',        45, false, false, 10),
+ ('COLLECTION',   'Payment collection',     '{"hi":"भुगतान संग्रह"}',      30, false, false, 20),
+ ('SERVICE',      'Service / complaint',    '{"hi":"सेवा / शिकायत"}',      60, false, false, 30),
+ ('DEMO',         'Product demonstration',  '{"hi":"उत्पाद प्रदर्शन"}',     90, false, false, 40),
+ ('NEW_PROSPECT', 'New prospect',           '{"hi":"नया संभावित ग्राहक"}',  45, false, false, 50),
+ ('COURTESY',     'Courtesy / relationship','{"hi":"शिष्टाचार भेंट"}',      30, false, false, 60),
+ ('REMOTE_CALL',  'Telephonic / online',    '{"hi":"टेलीफोनिक / ऑनलाइन"}',  20, false, true,  70)
+ON CONFLICT (code) DO NOTHING;
+
+-- Opportunity pipeline stages (rename freely; the app reads these, nothing is hardcoded)
+INSERT INTO config.opportunity_stage (code, name, name_i18n, probability_pct, is_won, is_lost, requires_reason, sort_order) VALUES
+ ('IDENTIFIED',  'Identified',        '{"hi":"पहचाना गया"}',   10, false, false, false, 10),
+ ('QUALIFIED',   'Qualified',         '{"hi":"योग्य"}',        25, false, false, false, 20),
+ ('PROPOSAL',    'Proposal sent',     '{"hi":"प्रस्ताव भेजा"}',  50, false, false, false, 30),
+ ('NEGOTIATION', 'Negotiation',       '{"hi":"बातचीत"}',       75, false, false, false, 40),
+ ('WON',         'Won',               '{"hi":"जीता"}',        100, true,  false, false, 50),
+ ('LOST',        'Lost',              '{"hi":"खोया"}',          0, false, true,  true,  60),
+ ('ON_HOLD',     'On hold',           '{"hi":"रोका गया"}',      0, false, true,  true,  70)
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO config.visit_outcome (code, name, is_positive, requires_follow_up, sort_order) VALUES
@@ -75,10 +90,29 @@ INSERT INTO expense.expense_category
  ('MISC',          'Miscellaneous',     true,  NULL,  false, false, false, false, 140)
 ON CONFLICT (code) DO NOTHING;
 
+-- Rates below drive SUGGESTED amounts only; XInfo recomputes and decides.
+-- effective_from is backdated deliberately: rate lookup is `effective_from <= expense_date`,
+-- so seeding at CURRENT_DATE would leave every backdated expense without a rate.
 INSERT INTO expense.mileage_rate (travel_mode, grade, rate_per_km, effective_from) VALUES
- ('TWO_WHEELER', NULL, 3.50, CURRENT_DATE),
- ('CAR',         NULL, 9.00, CURRENT_DATE)
+ ('TWO_WHEELER', NULL, 3.50, DATE '2020-01-01'),
+ ('CAR',         NULL, 9.00, DATE '2020-01-01')
 ON CONFLICT DO NOTHING;
+
+INSERT INTO expense.per_diem_rate (grade, city_tier, full_day_rate, half_day_rate, travel_day_rate, lodging_cap, effective_from) VALUES
+ (NULL, 'METRO', 800.00, 400.00, 600.00, 4000.00, DATE '2020-01-01'),
+ (NULL, 'TIER1', 650.00, 325.00, 500.00, 3000.00, DATE '2020-01-01'),
+ (NULL, 'TIER2', 500.00, 250.00, 400.00, 2000.00, DATE '2020-01-01'),
+ (NULL, 'OTHER', 400.00, 200.00, 300.00, 1500.00, DATE '2020-01-01')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO expense.city_tier (city, state, tier) VALUES
+ ('Mumbai','Maharashtra','METRO'), ('Delhi','Delhi','METRO'),
+ ('Bengaluru','Karnataka','METRO'), ('Chennai','Tamil Nadu','METRO'),
+ ('Kolkata','West Bengal','METRO'), ('Hyderabad','Telangana','METRO'),
+ ('Pune','Maharashtra','TIER1'), ('Ahmedabad','Gujarat','TIER1'),
+ ('Nagpur','Maharashtra','TIER2'), ('Surat','Gujarat','TIER2'),
+ ('Coimbatore','Tamil Nadu','TIER2'), ('Indore','Madhya Pradesh','TIER2')
+ON CONFLICT (city) DO NOTHING;
 
 -- ---------------------------------------------------------------------
 -- Tracking tuning defaults (docs/03 §9)
@@ -129,7 +163,9 @@ INSERT INTO sync.sync_policy (role_code, entity, back_days, forward_days, attach
  (NULL, 'visit.visit',               90,    0,     'WIFI_ONLY',     10),
  (NULL, 'visit.visit_report',        90,    0,     'WIFI_ONLY',     10),
  (NULL, 'expense.expense',           180,   0,     'WIFI_ONLY',     15),
- (NULL, 'tracking.journey_event',    30,    0,     'NEVER',         0)
+ (NULL, 'tracking.journey_event',    30,    0,     'NEVER',         0),
+ (NULL, 'customer.opportunity',      36500, 36500, 'METADATA_ONLY', 10),
+ (NULL, 'customer.sales_history',    365,   0,     'METADATA_ONLY', 10)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO sync.retention_rule (entity, keep_days, action) VALUES

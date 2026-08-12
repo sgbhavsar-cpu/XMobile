@@ -162,6 +162,28 @@ CREATE TABLE visit.visit_attachment (
 );
 CREATE INDEX ix_visit_attachment ON visit.visit_attachment (visit_id);
 
+-- ---------------------------------------------------------------------
+-- Visit ↔ opportunity: which visit advanced which deal. Many-to-many,
+-- because one call often covers several open opportunities.
+-- ---------------------------------------------------------------------
+CREATE TABLE visit.visit_opportunity (
+    visit_id        uuid NOT NULL REFERENCES visit.visit(id) ON DELETE CASCADE,
+    opportunity_id  uuid NOT NULL REFERENCES customer.opportunity(id),
+    stage_before    text,
+    stage_after     text,
+    value_before    numeric(14,2),
+    value_after     numeric(14,2),
+    discussed_note  text,
+    linked_at       timestamptz NOT NULL DEFAULT now(),
+    row_version     bigint NOT NULL DEFAULT 0,
+    PRIMARY KEY (visit_id, opportunity_id)
+);
+CREATE INDEX ix_visit_opportunity_opp ON visit.visit_opportunity (opportunity_id);
+
+-- Late FK: stage history records the visit that moved the deal
+ALTER TABLE customer.opportunity_stage_history
+    ADD CONSTRAINT fk_opp_history_visit FOREIGN KEY (visit_id) REFERENCES visit.visit(id);
+
 SELECT config.fn_make_syncable('visit.visit',            'user_id', 'customer_id');
 SELECT config.fn_make_syncable('visit.visit_report',     'user_id', '-', 'visit_id');
 SELECT config.fn_make_syncable('visit.form_template',    '-', '-');

@@ -29,6 +29,7 @@ tags:
   - name: Expenses
   - name: Attachments
   - name: Customers
+  - name: Opportunities
   - name: Manager
   - name: Admin
   - name: Integration
@@ -704,6 +705,157 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CustomerSite' } } } } }
+    post:
+      tags: [Customers]
+      summary: Add a site to an existing customer (no approval gate)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerSiteUpsert' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerSite' } } } }
+
+  /v1/customers/{id}/history:
+    get:
+      tags: [Customers]
+      summary: Sales/order history and past visits for a customer
+      description: Sales history is a read-only rolling-window cache of XInfo data; visit history is XMobile's own.
+      parameters:
+        - { name: id,    in: path,  required: true, schema: { type: string, format: uuid } }
+        - { name: since, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales:  { type: array, items: { $ref: '#/components/schemas/SalesHistoryItem' } }
+                  visits: { type: array, items: { $ref: '#/components/schemas/Visit' } }
+                  salesAsOf: { type: string, format: date-time, description: Freshness of the cached sales data }
+
+  /v1/customers/{id}/summary:
+    get:
+      tags: [Customers]
+      summary: Customer 360 — what the rep sees before walking in
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Customer360' } } } }
+
+  /v1/customers/propose:
+    post:
+      tags: [Customers]
+      summary: Propose a new customer from the field
+      description: |
+        Creates a PROSPECT that is immediately visitable and pushes it to XInfo for approval.
+        The local id never changes; XInfo's id is filled in on approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerProposal' }
+      responses:
+        '201': { description: Created as PROSPECT, content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
+
+  /v1/customers/{id}/contacts:
+    post:
+      tags: [Customers]
+      summary: Add a contact to an existing customer (no approval gate)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerContactUpsert' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContact' } } } }
+
+  # --------------------------------------------------------- Opportunities
+  /v1/opportunities:
+    get:
+      tags: [Opportunities]
+      summary: Opportunities visible to the caller
+      parameters:
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: openOnly,   in: query, schema: { type: boolean, default: true } }
+        - { name: userId,     in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Opportunity' } } } } }
+    post:
+      tags: [Opportunities]
+      summary: Create an opportunity (may originate in the field, offline)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpportunityUpsert' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Opportunity' } } } }
+
+  /v1/opportunities/{id}:
+    patch:
+      tags: [Opportunities]
+      summary: Update rep-owned fields (stage, value, expected close date)
+      description: |
+        Only rep-owned fields are accepted; ownership and customer linkage belong to XInfo.
+        A stage change writes stage history and, when supplied, links the visit that caused it.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpportunityUpdate' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Opportunity' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/opportunities/{id}/history:
+    get:
+      tags: [Opportunities]
+      summary: Stage and value movement, with the visit that caused each change
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/OpportunityStageChange' } }
+
+  /v1/visits/{id}/opportunities:
+    put:
+      tags: [Opportunities]
+      summary: Link the visit to the opportunities it advanced
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [opportunityId]
+                properties:
+                  opportunityId: { type: string, format: uuid }
+                  stageAfter:    { type: string }
+                  valueAfter:    { type: number }
+                  discussedNote: { type: string }
+      responses:
+        '200':
+          description: Linked
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Opportunity' } }
+
+  /v1/opportunity-stages:
+    get:
+      tags: [Opportunities]
+      summary: Configured pipeline stages
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/OpportunityStage' } } } } }
 
   /v1/sites/{id}/capture-location:
     post:
@@ -1644,6 +1796,169 @@ components:
         geofenceRadiusM: { type: integer }
         geoVerifiedAt:   { type: string, format: date-time }
         rowVersion:      { type: integer, format: int64 }
+
+    CustomerContact:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        fullName:    { type: string }
+        designation: { type: string }
+        department:  { type: string }
+        phone:       { type: string }
+        email:       { type: string }
+        isPrimary:   { type: boolean }
+        rowVersion:  { type: integer, format: int64 }
+
+    CustomerContactUpsert:
+      type: object
+      required: [id, fullName]
+      properties:
+        id:          { type: string, format: uuid }
+        siteId:      { type: string, format: uuid }
+        fullName:    { type: string }
+        designation: { type: string }
+        phone:       { type: string }
+        email:       { type: string }
+        isPrimary:   { type: boolean }
+
+    CustomerSiteUpsert:
+      type: object
+      required: [id, name]
+      properties:
+        id:              { type: string, format: uuid }
+        name:            { type: string }
+        addressLine1:    { type: string }
+        city:            { type: string }
+        state:           { type: string }
+        postalCode:      { type: string }
+        point:           { $ref: '#/components/schemas/GeoPoint' }
+        geofenceRadiusM: { type: integer }
+
+    CustomerProposal:
+      type: object
+      required: [id, name, site]
+      properties:
+        id:          { type: string, format: uuid, description: Client-generated; unchanged when XInfo approves }
+        name:        { type: string }
+        accountType: { type: string }
+        phone:       { type: string }
+        email:       { type: string }
+        gstNumber:   { type: string }
+        site:        { $ref: '#/components/schemas/CustomerSiteUpsert' }
+        contact:     { $ref: '#/components/schemas/CustomerContactUpsert' }
+        note:        { type: string }
+
+    Customer360:
+      type: object
+      properties:
+        customerId:         { type: string, format: uuid }
+        name:               { type: string }
+        lifecycleStatus:    { type: string, enum: [PROSPECT, PENDING_APPROVAL, ACTIVE, REJECTED, INACTIVE] }
+        category:           { type: string }
+        siteCount:          { type: integer }
+        lastVisitAt:        { type: string, format: date-time }
+        visits90d:          { type: integer }
+        sales12m:           { type: number }
+        lastOrderDate:      { type: string, format: date }
+        openOpportunities:  { type: integer }
+        openPipelineValue:  { type: number }
+        salesAsOf:          { type: string, format: date-time, description: Freshness of cached XInfo data }
+
+    SalesHistoryItem:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        documentType: { type: string, enum: [ORDER, INVOICE, RETURN] }
+        documentNo:   { type: string }
+        documentDate: { type: string, format: date }
+        amount:       { type: number }
+        currency:     { type: string }
+        status:       { type: string }
+        summary:      { type: string }
+
+    Opportunity:
+      type: object
+      properties:
+        id:                { type: string, format: uuid }
+        xinfoId:           { type: string, nullable: true }
+        customerId:        { type: string, format: uuid }
+        customerName:      { type: string }
+        siteId:            { type: string, format: uuid }
+        ownerUserId:       { type: string, format: uuid }
+        title:             { type: string }
+        description:       { type: string }
+        stageCode:         { type: string }
+        stageName:         { type: string }
+        estimatedValue:    { type: number }
+        currency:          { type: string }
+        probabilityPct:    { type: integer }
+        expectedCloseDate: { type: string, format: date }
+        source:            { type: string }
+        competitor:        { type: string }
+        closedAt:          { type: string, format: date-time, nullable: true }
+        closeReasonCode:   { type: string }
+        actualValue:       { type: number }
+        isFieldCreated:    { type: boolean }
+        repFieldsUpdatedAt: { type: string, format: date-time }
+        rowVersion:        { type: integer, format: int64 }
+
+    OpportunityUpsert:
+      type: object
+      required: [id, customerId, title, stageCode]
+      properties:
+        id:                { type: string, format: uuid }
+        customerId:        { type: string, format: uuid }
+        siteId:            { type: string, format: uuid }
+        contactId:         { type: string, format: uuid }
+        title:             { type: string }
+        description:       { type: string }
+        stageCode:         { type: string }
+        estimatedValue:    { type: number }
+        currency:          { type: string, default: INR }
+        expectedCloseDate: { type: string, format: date }
+        source:            { type: string }
+        competitor:        { type: string }
+        visitId:           { type: string, format: uuid, description: Visit that originated the deal, if any }
+
+    OpportunityUpdate:
+      type: object
+      description: Rep-owned fields only. XInfo owns ownership, customer and site linkage.
+      properties:
+        stageCode:         { type: string }
+        estimatedValue:    { type: number }
+        expectedCloseDate: { type: string, format: date }
+        probabilityPct:    { type: integer }
+        competitor:        { type: string }
+        closeReasonCode:   { type: string, description: Required when moving to a won/lost stage that demands a reason }
+        closeRemark:       { type: string }
+        actualValue:       { type: number }
+        visitId:           { type: string, format: uuid, description: Attributes the change to a visit }
+        baseVersion:       { type: integer, format: int64 }
+
+    OpportunityStage:
+      type: object
+      properties:
+        code:            { type: string }
+        name:            { type: string }
+        nameI18n:        { type: object, additionalProperties: { type: string } }
+        probabilityPct:  { type: integer }
+        isWon:           { type: boolean }
+        isLost:          { type: boolean }
+        isOpen:          { type: boolean }
+        requiresReason:  { type: boolean }
+        sortOrder:       { type: integer }
+
+    OpportunityStageChange:
+      type: object
+      properties:
+        fromStage:   { type: string }
+        toStage:     { type: string }
+        changedAt:   { type: string, format: date-time }
+        changedBy:   { type: string, format: uuid }
+        visitId:     { type: string, format: uuid, nullable: true }
+        valueBefore: { type: number }
+        valueAfter:  { type: number }
+        reason:      { type: string }
 
     LiveStatus:
       type: object

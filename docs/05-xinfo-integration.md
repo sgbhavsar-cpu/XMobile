@@ -9,15 +9,20 @@ XMobile is the mobility system of record: it owns visits, reports, journeys and 
 | Data | Master | Flow |
 |---|---|---|
 | Customer accounts, sites, contacts | **XInfo** | Pull → XMobile (read-mostly) |
+| New accounts proposed in the field | **XMobile** proposes, **XInfo** approves | Push as `PROSPECT`; approval + `xinfo_id` pulled back |
+| New sites / contacts on existing accounts | **XMobile** creates | Push directly, no approval gate |
 | Customer geo-coordinates | **XMobile** (field-captured) | Pull if XInfo has them; push back field captures |
+| **Opportunities** | **Shared — two-way** | Pull XInfo's fields; push rep's stage/value/close-date edits and field-created deals |
+| **Sales / order history** | **XInfo** | Pull, read-only, rolling window |
 | Sales rep ↔ customer assignment | **XInfo** | Pull |
 | Org hierarchy (rep → manager → territory) | **XInfo** | Pull |
-| User accounts / credentials | AD/LDAP/OIDC | Neither; matched by employee code |
+| User accounts / credentials | Keycloak (federating AD/LDAP if present) | Neither; matched by employee code |
 | Tours, visit plans | **XMobile** | Push (summary) |
 | Visits, visit reports | **XMobile** | Push |
 | Journey events, distance, attendance | **XMobile** | Push (daily summary + on completion) |
 | Expenses + receipts | **XMobile** captures, **XInfo** approves | Push; status pulled back |
-| Reference data (expense categories, visit types) | **XInfo** where it exists | Pull, mapped by code |
+| Mileage / per-diem **amounts** | **XInfo** decides; XMobile suggests | Rates pulled down for local suggestions |
+| Reference data (expense categories, visit types, opportunity stages) | **XInfo** where it exists | Pull, mapped by code |
 
 ## 2. Transport
 
@@ -81,7 +86,13 @@ dispatcher : claim batch (SKIP LOCKED) → POST to XInfo → mark SENT / retry w
 | `EXPENSE_UPDATED` | Pre-push edit | Same |
 | `JOURNEY_DAILY_SUMMARY` | Nightly per rep/day | First out, last in, km by mode, time at customers, gaps, anomalies |
 | `CUSTOMER_GEO_CAPTURED` | Rep captures/corrects site coordinates | Site id, coords, accuracy, capturer, timestamp |
-| `ATTENDANCE_DERIVED` | Nightly | Working/travel/leave classification derived from the journey |
+| `ATTENDANCE_DERIVED` | Nightly | Working/travel/leave classification, **information only** — XMobile is not the attendance system of record |
+| `CUSTOMER_PROPOSED` | Rep captures a prospect | Name, address, coords, contact, proposing rep |
+| `CUSTOMER_SITE_ADDED` | Rep adds a site to an existing account | Site details + coordinates |
+| `CUSTOMER_CONTACT_ADDED` | Rep adds a contact | Contact details |
+| `OPPORTUNITY_CREATED` | Rep creates a deal in the field | Customer, title, stage, value, expected close |
+| `OPPORTUNITY_UPDATED` | Rep edits stage / value / close date | Changed fields only, with `rep_fields_updated_at` for ordering |
+| `OPPORTUNITY_LINKED_TO_VISIT` | Visit tagged against a deal | Visit id, opportunity id, stage/value before and after |
 
 ### Receipts
 
@@ -91,6 +102,23 @@ Two supported modes, chosen per deployment:
    (no large payloads), requires network reachability from XInfo to MinIO.
 2. **Inline base64** in the message, chunked if > 5 MB. Slower but works when XInfo cannot
    reach MinIO.
+
+### Two-way opportunity sync
+
+The only entity where both sides write, so it needs an explicit rule rather than a general
+policy:
+
+- **Pull** refreshes XInfo-owned fields only (ownership, customer/site linkage, ids) and
+  leaves rep-owned fields alone if `rep_fields_updated_at` is newer than the record's
+  XInfo modification time.
+- **Push** sends only the rep-owned fields that changed, with `rep_fields_updated_at` as the
+  ordering token, so XInfo can reject a stale update rather than silently overwriting a
+  newer one.
+- A field-created opportunity is pushed whole on creation and gets its `xinfo_id` back;
+  the local UUID never changes.
+- If XInfo closes a deal (won/lost) while the rep also edited it offline, **XInfo wins on
+  closure** — a closed deal is a business fact, and the rep's edit surfaces in the conflicts
+  inbox instead of being applied.
 
 ## 5. Status flow-back
 
@@ -140,6 +168,16 @@ Before build starts, these need confirming:
 5. Auth mechanism and credential rotation.
 6. Status flow-back endpoint and its statuses.
 7. Rate limits and maintenance windows.
+8. **Opportunity API**: read + write endpoints, its stage vocabulary (to seed
+   `config.opportunity_stage` and `integration.code_map`), whether it accepts partial
+   (field-level) updates, and whether it can accept an externally-created opportunity id.
+9. **Prospect intake**: can XInfo accept a proposed customer in a pending state, and what
+   does it return on approval or rejection?
+10. **Sales history endpoint**: order/invoice read access, grain (header only vs line items),
+    and how far back.
+11. **Rate tables**: does XInfo expose mileage and per-diem rates so XMobile can sync them,
+    or are they maintained in XMobile's admin? (Suggested amounts are only as good as the
+    rates behind them.)
 
 Until they are confirmed, the `Integration` module is written against `IXInfoClient` with a
 file-based stub implementation so the rest of the system can be built and tested. This is

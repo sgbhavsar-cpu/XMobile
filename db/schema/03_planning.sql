@@ -17,10 +17,11 @@ CREATE TABLE planning.tour (
     actual_end_at       timestamptz,        -- confirmed ARRIVE_HOME
     status              planning.tour_status NOT NULL DEFAULT 'DRAFT',
     is_single_day       boolean GENERATED ALWAYS AS (planned_start_date = planned_end_date) STORED,
-    baseline_locked_at  timestamptz,        -- plan-vs-actual compares against this snapshot
+    -- Planning is self-service: no manager approval gate. The baseline is locked when the
+    -- tour starts, so plan-vs-actual compares against intent rather than a plan edited at
+    -- day's end (docs/02 §2.1).
+    baseline_locked_at  timestamptz,
     created_by          uuid REFERENCES identity.app_user(id),
-    approved_by         uuid REFERENCES identity.app_user(id),   -- optional pre-approval by manager
-    approved_at         timestamptz,
     cancel_reason       text,
     remark              text,
     -- rollups maintained by the tracking worker
