@@ -148,9 +148,39 @@ above them ours. Our own database is unaffected and stays on PostgreSQL. The pro
 contract they implement against is `db/xinfo-mssql/01_procedures.sql`, and a build-failing
 test keeps it in step with the code. See [12 — XInfo gateway](12-xinfo-gateway.md).
 
+**The XMobile.Api backend now exists** (`src/XMobile.Api`, `src/XMobile.Persistence`,
+`src/Modules/XMobile.{Identity,Customers,Planning,Visits}`) — Phase 1's core REST surface:
+device registration, `/v1/auth/me`, consent, assigned-customer reads, tours/tour-days/visit
+plans, check-in/check-out, and the visit report (fixed core + dynamic `answers`). It is
+schema-first: EF Core is hand-mapped onto `db/schema/*.sql` (no EF migrations generate schema),
+including the PostgreSQL enum types, `geography(Point,4326)` columns, and the trigger-owned
+`row_version`/`updated_at`/`sync.change_log` columns db/README.md documents. Modules never
+reference each other directly for business data — cross-module reads/writes (a tour showing its
+visits, a check-in completing a visit plan) go through small interfaces on `XMobile.Shared`,
+implemented by whichever module owns the table and consumed by whichever needs it. Auth is a
+dev-mode HS256 bearer token (`POST /v1/auth/dev/login`, not in `api/openapi.yaml`) standing in
+for Keycloak, which isn't deployed yet — same validation code path, only the signing-key source
+changes later. Verified by 4 integration tests running the full plan→check-in→check-out→submit
+flow against a real Testcontainers Postgres+PostGIS instance (`tests/XMobile.Api.Tests`), on top
+of the existing 73.
+
+Known gaps from this pass, worth closing before the next one:
+- No endpoint yet to create/update a rep's home location, which `POST /v1/tours` requires —
+  `api/openapi.yaml` doesn't define one either. Tests seed it directly via `XMobileDbContext`.
+- `customerName`/`siteName` are left null on `VisitPlan`/`Visit` responses — populating them needs
+  a small lookup this pass didn't wire up (the data lives in `XMobile.Customers`).
+- No FluentValidation pipeline yet (`docs/08-backend-structure.md`'s stated choice) — only the
+  invariants exercised by the tests are enforced by hand (`DomainValidationException`).
+
 **Next**, in order:
-1. `HttpApiClient` — implement the existing `ApiClient` contract against the real endpoints.
-   One provider override swaps it in; no screen changes.
-2. Ingest API + inference worker wrapping the engine (the imperative shell around the pure core).
-3. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
-4. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.
+1. `/v1/sync/pull` and `/v1/sync/push` — the offline protocol in
+   [04 — Offline sync](04-offline-sync.md), reading `sync.change_log` and the per-entity conflict
+   policy table. Substantial enough to be its own pass rather than an add-on to this one.
+2. `HttpApiClient` — implement the existing Flutter `ApiClient` contract against the endpoints
+   that now exist. `MockApiClient` stays the default provider until coverage is complete; the
+   Dart `Visit`/`Tour`/`VisitPlan` models need a `rowVersion` field first for optimistic
+   concurrency on writes.
+3. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
+   pure core).
+4. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
+5. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.

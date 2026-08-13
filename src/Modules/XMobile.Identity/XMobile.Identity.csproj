@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\XMobile.Shared\XMobile.Shared.csproj" />
+    <ProjectReference Include="..\..\XMobile.Persistence\XMobile.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Issues the dev-mode bearer token (see Endpoints/AuthEndpoints.cs). Real Keycloak later
+         validates tokens via JwtBearer + JWKS in XMobile.Api; this module only ever issues, in
+         the dev stub, and reads claims off the already-authenticated principal. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Not Sdk.Web, but ICurrentUser's HttpContext-backed implementation and endpoint mapping
+         need the ASP.NET Core shared-framework types (IHttpContextAccessor, IEndpointRouteBuilder). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <RootNamespace>XMobile.Identity</RootNamespace>
+  </PropertyGroup>
+
+</Project>

@@ -88,19 +88,30 @@ OpenAPI 3.1 outline: [`api/openapi.yaml`](api/openapi.yaml).
 ```
 app/                                     Flutter app (built, runs on mock backend)
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
+src/XMobile.Api, XMobile.Persistence,    the app's own backend (built): Phase 1 REST surface —
+  Modules/XMobile.{Identity,Customers,     auth/device, customers (read), tours/plans,
+  Planning,Visits}/                        check-in/out, visit reports
 src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
 db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
-tests/                                   73 .NET tests
+tests/                                   77 .NET tests (4 of them integration tests against a
+                                          real Testcontainers Postgres+PostGIS)
 ```
 
 ```bash
-dotnet test                    # 73 tests — no database, network or device
+dotnet test                    # 77 tests — needs Docker for XMobile.Api.Tests, nothing else
 cd app && flutter test         # 52 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
 the whole detection ruleset replays over recorded traces in CI.
 See [11 — Journey engine](docs/11-journey-engine.md).
+
+**XMobile.Api** — the app's own backend, schema-first against `db/schema/*.sql` (EF Core is
+hand-mapped onto it, not the other way round). Modules talk through interfaces on
+`XMobile.Shared` rather than each other's tables or projects — see [08 — Backend
+structure](docs/08-backend-structure.md). Covers Phase 1's device/auth, customer reads, tours and
+visit plans, and check-in/out through report submission; `/v1/sync/*` and wiring the Flutter app
+to it are next (see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status)).
 
 **XInfo gateway** — XInfo has no API, so we build one: REST for our backend, stored
 procedures into their SQL Server. Our own database is untouched by this and stays on

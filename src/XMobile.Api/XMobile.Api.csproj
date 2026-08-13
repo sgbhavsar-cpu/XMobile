@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\XMobile.Shared\XMobile.Shared.csproj" />
+    <ProjectReference Include="..\XMobile.Persistence\XMobile.Persistence.csproj" />
+    <ProjectReference Include="..\Modules\XMobile.Identity\XMobile.Identity.csproj" />
+    <ProjectReference Include="..\Modules\XMobile.Customers\XMobile.Customers.csproj" />
+    <ProjectReference Include="..\Modules\XMobile.Planning\XMobile.Planning.csproj" />
+    <ProjectReference Include="..\Modules\XMobile.Visits\XMobile.Visits.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <RootNamespace>XMobile.Api</RootNamespace>
+  </PropertyGroup>
+
+</Project>
