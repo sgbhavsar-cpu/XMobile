@@ -1,7 +1,9 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmobile/core/api/mock_api_client.dart';
+import 'package:xmobile/core/db/app_database.dart';
 import 'package:xmobile/core/models/models.dart';
 import 'package:xmobile/core/state/providers.dart';
 import 'package:xmobile/core/ui/common.dart';
@@ -220,8 +222,15 @@ void main() {
     });
 
     testWidgets('the banner reports queued work rather than hiding it', (tester) async {
+      // overrideWithValue bypasses the provider's own ref.onDispose(db.close) registration, so
+      // the in-memory database needs its own explicit teardown here.
+      final testDb = AppDatabase(NativeDatabase.memory());
+      addTearDown(testDb.close);
       final container = ProviderContainer(
-        overrides: [apiClientProvider.overrideWithValue(api)],
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          driftDatabaseProvider.overrideWithValue(testDb),
+        ],
       );
       addTearDown(container.dispose);
 

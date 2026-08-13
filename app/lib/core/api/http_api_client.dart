@@ -10,31 +10,45 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:uuid/uuid.dart';
 
 import '../models/models.dart';
 import 'api_client.dart';
+import 'token_store.dart';
 
 /// "yyyy-MM-dd" — how the backend's `DateOnly` query params/fields expect dates.
 String _dateOnly(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 class HttpApiClient implements ApiClient {
-  HttpApiClient({required this.baseUrl, http.Client? httpClient})
-      : _http = httpClient ?? http.Client();
+  HttpApiClient({required this.baseUrl, http.Client? httpClient, TokenStore? tokenStore})
+      : _http = httpClient ?? http.Client(),
+        _tokenStore = tokenStore ?? SecureTokenStore();
 
   /// No trailing slash, e.g. `https://xmobile.internal/api`.
   final String baseUrl;
   final http.Client _http;
+  final TokenStore _tokenStore;
 
-  /// Not persisted across app restarts — there's no local database yet (see pubspec.yaml).
-  /// A real device would keep this stable; this is a disclosed limitation of this pass.
-  final String _deviceId = const Uuid().v4();
+  /// Cached after the first resolution — see `_resolveDeviceId`/`_ensureTokenLoaded` below,
+  /// which lazily pull the persisted values out of `_tokenStore` (a real device keeps both
+  /// stable across restarts now; see token_store.dart).
+  String? _deviceId;
   String? _accessToken;
+  bool _tokenLoaded = false;
 
   static const _timeout = Duration(seconds: 20);
 
   // ---------------------------------------------------------------- request plumbing
+
+  Future<String> _resolveDeviceId() async => _deviceId ??= await _tokenStore.deviceId();
+
+  /// Loads the persisted token (if any) exactly once per client instance — a client constructed
+  /// against an already-signed-in device picks the session back up without a fresh `signIn`.
+  Future<void> _ensureTokenLoaded() async {
+    if (_tokenLoaded) return;
+    _accessToken = await _tokenStore.readToken();
+    _tokenLoaded = true;
+  }
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final clean = {...?query}..removeWhere((_, v) => v.isEmpty);
@@ -56,6 +70,7 @@ class HttpApiClient implements ApiClient {
     Object? body,
     bool notFoundAsNull = false,
   }) async {
+    await _ensureTokenLoaded();
     final uri = _uri(path, query);
     final encodedBody = body == null ? null : jsonEncode(body);
     http.Response response;
@@ -128,10 +143,15 @@ class HttpApiClient implements ApiClient {
         await _send('POST', '/v1/auth/dev/login', body: {'employeeCode': employeeCode})
             as Map<String, dynamic>;
     _accessToken = login['accessToken'] as String;
+    _tokenLoaded = true;
+    await _tokenStore.writeToken(_accessToken);
 
-    // ApiClient has no separate device-registration method, so it's folded in here.
+    // ApiClient has no separate device-registration method, so it's folded in here. The device
+    // id is stable across restarts (see _resolveDeviceId) and RegisterDeviceAsync upserts by id
+    // (src/Modules/XMobile.Identity/Endpoints/AuthEndpoints.cs), so re-registering the same id
+    // on every sign-in is safe — it just refreshes LastSeenAt etc., never duplicates.
     await _send('POST', '/v1/auth/device', body: {
-      'deviceId': _deviceId,
+      'deviceId': await _resolveDeviceId(),
       'platform': Platform.isIOS ? 'IOS' : 'ANDROID',
     });
 

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:xmobile/core/api/api_client.dart';
 import 'package:xmobile/core/api/http_api_client.dart';
+import 'package:xmobile/core/api/token_store.dart';
 
 http.Response _json(Object body, {int status = 200}) =>
     http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
@@ -48,7 +49,7 @@ void main() {
         return http.Response('not found', 404);
       });
 
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
       final user = await api.signIn(employeeCode: 'E100', password: 'ignored');
 
       expect(user.id, 'u1');
@@ -64,10 +65,85 @@ void main() {
     });
   });
 
+  group('token persistence', () {
+    test('signIn writes the token into the injected TokenStore', () async {
+      final client = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/v1/auth/dev/login') {
+          return _json({
+            'accessToken': 'tok-456',
+            'userId': 'u1',
+            'employeeCode': 'E100',
+            'roles': ['SALES_REP'],
+          });
+        }
+        if (request.method == 'POST' && request.url.path == '/v1/auth/device') {
+          return _json({'deviceId': 'd1', 'syncPolicy': [], 'policyVersion': 1, 'settings': {}});
+        }
+        if (request.method == 'GET' && request.url.path == '/v1/auth/me') {
+          return _json({
+            'userId': 'u1',
+            'employeeCode': 'E100',
+            'fullName': 'Test Rep',
+            'roles': ['SALES_REP'],
+            'shiftStart': '09:00',
+            'shiftEnd': '18:00',
+            'workingDays': [1, 2, 3, 4, 5, 6],
+            'consentRequired': false,
+          });
+        }
+        return http.Response('not found', 404);
+      });
+      final store = InMemoryTokenStore();
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: store);
+
+      await api.signIn(employeeCode: 'E100', password: 'ignored');
+
+      expect(await store.readToken(), 'tok-456');
+    });
+
+    test('a device id already in the TokenStore is reused rather than regenerated', () async {
+      final store = InMemoryTokenStore(initialDeviceId: 'stable-device-1');
+      String? registeredDeviceId;
+      final client = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/v1/auth/dev/login') {
+          return _json({
+            'accessToken': 'tok-789',
+            'userId': 'u1',
+            'employeeCode': 'E100',
+            'roles': ['SALES_REP'],
+          });
+        }
+        if (request.method == 'POST' && request.url.path == '/v1/auth/device') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          registeredDeviceId = body['deviceId'] as String;
+          return _json({'deviceId': registeredDeviceId, 'syncPolicy': [], 'policyVersion': 1, 'settings': {}});
+        }
+        if (request.method == 'GET' && request.url.path == '/v1/auth/me') {
+          return _json({
+            'userId': 'u1',
+            'employeeCode': 'E100',
+            'fullName': 'Test Rep',
+            'roles': ['SALES_REP'],
+            'shiftStart': '09:00',
+            'shiftEnd': '18:00',
+            'workingDays': [1, 2, 3, 4, 5, 6],
+            'consentRequired': false,
+          });
+        }
+        return http.Response('not found', 404);
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: store);
+
+      await api.signIn(employeeCode: 'E100', password: 'ignored');
+
+      expect(registeredDeviceId, 'stable-device-1');
+    });
+  });
+
   group('error mapping', () {
     test('a problem+json 409 becomes an ApiException with the server detail', () async {
       final client = MockClient((request) async => _problem('Stale version', status: 409));
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       await expectLater(
         api.startTour('t1'),
@@ -83,7 +159,7 @@ void main() {
               'outOfFenceReasonCode': ['required outside the geofence'],
             },
           ));
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       await expectLater(
         api.startTour('t1'),
@@ -97,7 +173,7 @@ void main() {
 
     test('a network failure surfaces as OfflineException, not a crash', () async {
       final client = MockClient((request) async => throw const SocketException('no route'));
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       await expectLater(api.tours(), throwsA(isA<OfflineException>()));
     });
@@ -105,7 +181,7 @@ void main() {
     test('a method with no backend support throws a catchable ApiException, not UnimplementedError',
         () async {
       final client = MockClient((request) async => http.Response('should not be called', 500));
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       // _notSupported() throws synchronously (Never), before a Future exists to await — so this
       // needs the tear-off form (throwsA calls it itself, inside its own try/catch) rather than
@@ -143,7 +219,7 @@ void main() {
               {'id': 'v1', 'customerId': 'c1', 'siteId': 's1', 'visitTypeCode': 'SALES_CALL', 'localDate': '2026-08-13', 'checkInAt': '2026-08-13T10:00:00Z', 'status': 'CHECKED_IN'},
             ],
           }));
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       final tour = await api.tour('t1');
 
@@ -183,7 +259,7 @@ void main() {
           'visits': const [],
         });
       });
-      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client);
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
       final plans = await api.visitPlans(tourId: 't1');
 

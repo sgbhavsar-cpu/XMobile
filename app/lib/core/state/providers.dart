@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
 import '../api/mock_api_client.dart';
+import '../db/app_database.dart';
 import '../models/enums.dart';
 import '../models/models.dart';
 import 'outbox.dart';
@@ -231,10 +232,21 @@ final openVisitProvider = FutureProvider<Visit?>((ref) async {
   return null;
 });
 
+// ------------------------------------------------------------------ local persistence
+
+/// Defaults to a real on-device file (see AppDatabase's constructor); override with
+/// `AppDatabase(NativeDatabase.memory())` in tests, the same pattern `apiClientProvider`
+/// demonstrates for swapping in a fake.
+final driftDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
+
 // ------------------------------------------------------------------ outbox
 
 final outboxProvider = StateNotifierProvider<OutboxNotifier, List<OutboxEntry>>(
-  (ref) => OutboxNotifier(),
+  (ref) => OutboxNotifier(ref.watch(driftDatabaseProvider)),
 );
 
 final pendingSyncCountProvider = Provider<int>((ref) {

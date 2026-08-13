@@ -25,7 +25,18 @@ dependencies:
   # plain `http` package, not dio/chopper: plain JSON REST, no multipart/interceptor need yet.
   http: ^1.2.2
 
-  # NOTE: still deliberately no local database or location plugin.
+  # Local persistence (lib/core/db/, lib/core/api/token_store.dart) — the outbox queue and
+  # HttpApiClient's bearer token/device id now survive an app restart. drift_flutter's
+  # driftDatabase() helper resolves the platform storage path so this project doesn't hand-roll
+  # path_provider lookups. NOTE: the DB itself is NOT yet SQLCipher-encrypted — that needs a real
+  # device/CI to verify the native binary + platform-channel setup, which this pass couldn't do;
+  # the bearer token and device id (the actually sensitive bits) go through flutter_secure_storage
+  # (Keystore/Keychain) regardless. Still deliberately no location plugin — that needs a device too.
+  drift: ^2.21.0
+  drift_flutter: ^0.2.0
+  sqlite3_flutter_libs: ^0.5.28
+  flutter_secure_storage: ^9.2.2
+
   # MockApiClient stays the default provider until HttpApiClient covers enough of ApiClient
   # that swapping in the real implementation (one provider override — see
   # lib/core/api/api_client.dart) doesn't break screens that use the parts it doesn't yet.
@@ -34,6 +45,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  drift_dev: ^2.21.0
+  build_runner: ^2.4.13
 
 flutter:
   uses-material-design: true

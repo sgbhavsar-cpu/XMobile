@@ -10,7 +10,7 @@ of it that covers today. It isn't the default provider yet; swap it in per the o
 cd app
 flutter pub get
 flutter run          # any employee code + a 4-character password signs you in
-flutter test         # 59 tests, no device or emulator needed
+flutter test         # 66 tests, no device or emulator needed
 flutter analyze
 ```
 
@@ -66,16 +66,19 @@ the typing in the common case.
 lib/
   app/            router, shell, theme
   core/
-    api/          ApiClient contract, MockApiClient, HttpApiClient, seed data
+    api/          ApiClient contract, MockApiClient, HttpApiClient, TokenStore, seed data
+    db/           Drift database (local persistence — outbox table so far)
     models/       domain models + enums mirroring the API
-    state/        Riverpod providers, offline outbox
+    state/        Riverpod providers, offline outbox (now Drift-backed)
     ui/           form fields, status chips, async/error/empty states
   features/
     auth/ home/ tours/ visits/ customers/ opportunities/
     expenses/ journey/ settings/ sync/ more/ developer/
 test/
-  flows_test.dart    39 end-to-end rules against the in-memory backend
-  widget_test.dart   13 tests rendering real screens and driving forms
+  flows_test.dart              39 end-to-end rules against the in-memory backend
+  widget_test.dart             13 tests rendering real screens and driving forms
+  http_api_client_test.dart    9 tests against a fake http.Client (incl. token/device-id persistence)
+  outbox_repository_test.dart  5 tests against a real (in-memory) Drift database
 ```
 
 ## Try these

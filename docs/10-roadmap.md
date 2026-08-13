@@ -293,12 +293,58 @@ Known gaps from this pass:
   Tracking — every existing test happens to submit `DateTimeOffset.UtcNow`, so it's never been
   exercised, but a real client sending its local offset would hit the same Npgsql error.
 
+**Local persistence now exists** (`app/lib/core/db/`, `app/lib/core/api/token_store.dart`) — the
+first slice of docs/07 §5's Drift/SQLCipher design, scoped to the two concrete things that were
+actually losing data on every restart: the sync outbox and `HttpApiClient`'s session.
+`AppDatabase` (Drift over SQLite, via `drift_flutter`'s `driftDatabase()` helper for the
+platform-path lookup) has one table so far — `OutboxEntries`, mirroring the existing
+`OutboxEntry`/`SyncState` model plus the `payload`/`baseVersion` columns docs/04 §6's protocol
+needs but no caller populates yet. `OutboxNotifier` (`app/lib/core/state/outbox.dart`) keeps its
+public API byte-identical to the in-memory version it replaces — `enqueue`/`markSynced`/
+`markFailed`/`remove`/`clearSynced`/`hasPendingFor`/`pendingCount`, same signatures — so none of
+its 13 existing call sites across the app changed; internally it now subscribes to a Drift
+`Stream<List<OutboxEntry>>` and writes through to the database on every mutating call instead of
+holding the list itself. Separately, `TokenStore` (`flutter_secure_storage`-backed, Keystore/
+Keychain) gives `HttpApiClient` a stable device id and a persisted bearer token across restarts —
+it previously regenerated a fresh device id and lost its token on every cold start, both
+disclosed as known limitations when it was built. Verified by 66/66 Flutter tests (dependencies
+resolved and `dart run build_runner build` codegen'd for real — this pass confirmed a working
+Flutter/Dart SDK exists in this environment after initially finding none on PATH), including 5
+new outbox-repository tests against a real (in-memory) Drift database — one of them constructs a
+second `OutboxNotifier` over the same underlying database and confirms it sees the first one's
+queued entry, the actual proof this is durable storage and not an in-memory illusion wearing a
+Drift costume — and 2 new `HttpApiClient` token-persistence tests.
+
+Known gaps from this pass:
+- **The database is not SQLCipher-encrypted.** `sqlcipher_flutter_libs`' native-binary/
+  platform-channel setup needs a real device or CI to verify, which this sandbox doesn't have —
+  shipping that unverified seemed worse than shipping plaintext-at-rest with the gap disclosed.
+  The outbox holds mutation *metadata* (entity/op/description), not credentials; the bearer token
+  and device id — the actually sensitive material — already go through `flutter_secure_storage`
+  regardless. Follow-up once there's a device to test encryption on.
+- **Only the outbox table exists** — not the full "Drift schema mirrors the server subset" vision
+  (a table per entity: customers, tours, visits, expenses, etc., mirroring `MockApiClient`'s
+  entire in-memory world). No urgency yet: `MockApiClient` stays the default provider until far
+  more of `ApiClient` is backed by `HttpApiClient`, so no live screen reads from a local cache
+  today. This is genuinely a multi-increment effort on its own.
+- **`app/lib/main.dart` has a pre-existing compile error** (`CardTheme` vs `CardThemeData`,
+  surfaced by `flutter analyze`, not `flutter test` — confirmed present on a clean checkout before
+  this pass touched anything, a Flutter SDK version drift issue, not something introduced here)
+  and still doesn't wire `HttpApiClient` into `apiClientProvider` — both pre-date this pass and
+  are unrelated to local persistence specifically.
+- `payload`/`baseVersion` on the outbox table are unpopulated — no caller sets them yet; they're
+  there so the real sync engine (push/pull workers, conflict handling) doesn't need a migration
+  the moment it lands.
+
 **Next**, in order:
-1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
-2. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state
-   — and giving `HttpApiClient` somewhere to persist its token/device id across restarts.
-3. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
+1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
+   flows — needs a real device, which this environment doesn't have.
+2. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
    journey/tracking, remaining reference data) as their backend modules get built, then flip
    `apiClientProvider` to `HttpApiClient` as the default once coverage is complete enough.
-4. Audit the non-UTC-offset `DateTimeOffset` gap noted above across the rest of the API, not just
-   Tracking.
+3. Audit the non-UTC-offset `DateTimeOffset` gap noted in the Tracking section above across the
+   rest of the API.
+4. Fix the pre-existing `main.dart` `CardTheme`/`CardThemeData` compile error and wire
+   `HttpApiClient`/local persistence into an actual app bootstrap.
+5. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
+   docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.

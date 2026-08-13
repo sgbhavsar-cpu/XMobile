@@ -102,7 +102,7 @@ tests/                                   85 .NET tests (12 of them integration t
 
 ```bash
 dotnet test                    # 85 tests — needs Docker for XMobile.Api.Tests, nothing else
-cd app && flutter test         # 59 app tests — no device or emulator
+cd app && flutter test         # 66 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
@@ -132,6 +132,16 @@ tours/plans, check-in/out and reports against the endpoints above; everything wi
 yet (opportunities, expenses, journey/tracking, most reference data) throws a catchable
 `ApiException` instead of pretending to work. `MockApiClient` stays the default provider until
 enough of that is backed — see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status).
+
+**Local persistence** — the sync outbox and `HttpApiClient`'s session now survive an app restart.
+`AppDatabase` (`app/lib/core/db/`) is a Drift/SQLite database with the outbox as its first table;
+`OutboxNotifier` writes through to it instead of holding the queue in memory, with its public API
+unchanged so nothing that calls it had to change. `TokenStore`
+(`app/lib/core/api/token_store.dart`, `flutter_secure_storage`-backed) gives `HttpApiClient` a
+stable device id and a persisted bearer token instead of losing both on every cold start. Not yet
+SQLCipher-encrypted at rest (needs a real device to verify — see
+[10 — Roadmap §6](docs/10-roadmap.md#6-build-status)), and not yet the full per-entity local
+cache docs/07 §5 describes.
 
 **Ingest API + inference worker** — the previously-inert `XMobile.Tracking.Engine` now has a
 caller. `InferenceRunner` (`src/Modules/XMobile.Tracking`) is the "imperative shell": it loads a
