@@ -1347,6 +1347,25 @@ class JourneyEvent {
   final bool isManual;
   final DateTime? originalOccurredAt;
 
+  /// The backend's JourneyEventDto (src/Modules/XMobile.Tracking/Contracts.cs) gives
+  /// `refType`/`refId`/`siteId`, not a resolved place name or customer id, and has no `isManual`
+  /// field at all — `placeName`/`customerId` come back null, and `isManual` is approximated from
+  /// `detectionMethod == 'MANUAL'` until there's a client-side lookup to resolve a site/customer.
+  static JourneyEvent fromJson(Map<String, dynamic> json) => JourneyEvent(
+        id: json['id'] as String,
+        type: JourneyEventType.fromWire(json['type'] as String),
+        occurredAt: DateTime.parse(json['occurredAt'] as String),
+        status: EventStatus.fromWire(json['status'] as String),
+        confidence: (json['confidence'] as num).toDouble(),
+        point: GeoPoint.fromJson(json['point'] as Map<String, dynamic>?),
+        method: json['detectionMethod'] as String?,
+        isEstimated: json['isEstimated'] as bool? ?? false,
+        isManual: json['detectionMethod'] == 'MANUAL',
+        originalOccurredAt: json['originalOccurredAt'] == null
+            ? null
+            : DateTime.parse(json['originalOccurredAt'] as String),
+      );
+
   JourneyEvent copyWith({
     DateTime? occurredAt,
     EventStatus? status,
@@ -1395,6 +1414,19 @@ class JourneySegment {
 
   Duration? get duration => endedAt?.difference(startedAt);
   bool get isTravel => type.contains('TRAVEL');
+
+  /// `placeName` has no backend field (JourneySegmentDto gives `refType`/`refId`/`siteId`, same
+  /// gap as `JourneyEvent.fromJson`) — left null.
+  static JourneySegment fromJson(Map<String, dynamic> json) => JourneySegment(
+        id: json['id'] as String,
+        type: json['type'] as String,
+        startedAt: DateTime.parse(json['startedAt'] as String),
+        endedAt: json['endedAt'] == null ? null : DateTime.parse(json['endedAt'] as String),
+        distanceM: (json['distanceM'] as num?)?.toInt() ?? 0,
+        travelMode: TravelMode.fromWire(json['travelMode'] as String?),
+        isEstimated: json['isEstimated'] as bool? ?? false,
+        isProvisional: json['isProvisional'] as bool? ?? false,
+      );
 }
 
 class DaySummary {
@@ -1421,6 +1453,22 @@ class DaySummary {
   final int visitsCompleted;
   final int? trackingCoveragePct;
   final String? attendanceStatus;
+
+  /// The backend's DailySummaryDto (src/Modules/XMobile.Tracking/Contracts.cs) only computes
+  /// the fields mapped below — `visitsPlanned`/`visitsCompleted`/`trackingCoveragePct`/
+  /// `attendanceStatus` need Planning/Visits cross-calls it deliberately skips (see that file's
+  /// own comment), so they come back at their defaults (0/null) rather than the mock's values.
+  static DaySummary fromJson(Map<String, dynamic> json) => DaySummary(
+        localDate: DateTime.parse(json['localDate'] as String),
+        firstDepartureAt: json['firstDepartureAt'] == null
+            ? null
+            : DateTime.parse(json['firstDepartureAt'] as String),
+        lastArrivalAt:
+            json['lastArrivalAt'] == null ? null : DateTime.parse(json['lastArrivalAt'] as String),
+        totalDistanceM: (json['totalDistanceM'] as num?)?.toInt() ?? 0,
+        travelTimeS: (json['travelTimeS'] as num?)?.toInt() ?? 0,
+        customerTimeS: (json['customerTimeS'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class TrackingHealth {

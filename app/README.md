@@ -10,7 +10,7 @@ of it that covers today. It isn't the default provider yet; swap it in per the o
 cd app
 flutter pub get
 flutter run          # any employee code + a 4-character password signs you in
-flutter test         # 66 tests, no device or emulator needed
+flutter test         # 74 tests, no device or emulator needed
 flutter analyze
 ```
 
@@ -33,8 +33,8 @@ ProviderScope(
 )
 ```
 
-No screen, form or repository changes — though about half of `ApiClient`'s methods
-(opportunities, expenses, journey/tracking, most reference-data lookups) have no backend yet and
+No screen, form or repository changes — though a good number of `ApiClient`'s methods
+(opportunities, expenses, most reference-data lookups, device tracking-health) have no backend yet and
 `HttpApiClient` throws a catchable `ApiException` for those rather than pretending to work; a
 screen exercising one of them will show an error instead of the mock's data until its module is
 built server-side. The mock deliberately models two things a naive stub would not, because both
@@ -77,7 +77,8 @@ lib/
 test/
   flows_test.dart              39 end-to-end rules against the in-memory backend
   widget_test.dart             13 tests rendering real screens and driving forms
-  http_api_client_test.dart    9 tests against a fake http.Client (incl. token/device-id persistence)
+  http_api_client_test.dart    17 tests against a fake http.Client (token/device-id persistence,
+                                journey/tracking mapping)
   outbox_repository_test.dart  5 tests against a real (in-memory) Drift database
 ```
 

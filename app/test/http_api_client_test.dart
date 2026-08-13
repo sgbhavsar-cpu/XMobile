@@ -7,6 +7,8 @@ import 'package:http/testing.dart';
 import 'package:xmobile/core/api/api_client.dart';
 import 'package:xmobile/core/api/http_api_client.dart';
 import 'package:xmobile/core/api/token_store.dart';
+import 'package:xmobile/core/models/enums.dart';
+import 'package:xmobile/core/models/models.dart';
 
 http.Response _json(Object body, {int status = 200}) =>
     http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
@@ -266,6 +268,229 @@ void main() {
       expect(plans, hasLength(1));
       expect(plans.single.id, 'p1');
       expect(plansEndpointCalled, isFalse);
+    });
+  });
+
+  group('journey/tracking', () {
+    Map<String, dynamic> journeyTimelineJson() => {
+          'userId': 'u1',
+          'from': '2026-08-13T00:00:00Z',
+          'to': '2026-08-13T23:59:59Z',
+          'events': [
+            {
+              'id': 'e1',
+              'type': 'ARRIVE_CUSTOMER',
+              'occurredAt': '2026-08-13T09:30:00Z',
+              'localDate': '2026-08-13',
+              'point': {'lat': 18.52, 'lon': 73.85},
+              'refType': 'CUSTOMER_SITE',
+              'refId': 's1',
+              'siteId': 's1',
+              'detectionMethod': 'GEOFENCE',
+              'confidence': 0.9,
+              'status': 'CONFIRMED',
+              'isEstimated': false,
+              'rowVersion': 0,
+            },
+          ],
+          'segments': [
+            {
+              'id': 'seg1',
+              'type': 'OUTBOUND_TRAVEL',
+              'startedAt': '2026-08-13T09:00:00Z',
+              'endedAt': '2026-08-13T09:30:00Z',
+              'durationS': 1800,
+              'localDate': '2026-08-13',
+              'distanceM': 1750,
+              'travelMode': 'CAR',
+              'isEstimated': false,
+              'isProvisional': false,
+              'rowVersion': 0,
+            },
+          ],
+          'anomalies': const [],
+          'daily': [
+            {
+              'localDate': '2026-08-13',
+              'firstDepartureAt': '2026-08-13T09:00:00Z',
+              'lastArrivalAt': null,
+              'totalDistanceM': 1750,
+              'travelTimeS': 1800,
+              'customerTimeS': 3600,
+              'gapTimeS': 0,
+            },
+          ],
+        };
+
+    test('journeyEvents parses the events slice of GET /v1/tracking/journey', () async {
+      final client = MockClient((request) async => _json(journeyTimelineJson()));
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final events = await api.journeyEvents(
+          from: DateTime.utc(2026, 8, 13), to: DateTime.utc(2026, 8, 13, 23, 59, 59));
+
+      expect(events, hasLength(1));
+      expect(events.single.id, 'e1');
+      expect(events.single.type, JourneyEventType.arriveCustomer);
+      expect(events.single.status, EventStatus.confirmed);
+      expect(events.single.point?.lat, 18.52);
+    });
+
+    test('journeySegments parses the segments slice of the same endpoint', () async {
+      final client = MockClient((request) async => _json(journeyTimelineJson()));
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final segments = await api.journeySegments(
+          from: DateTime.utc(2026, 8, 13), to: DateTime.utc(2026, 8, 13, 23, 59, 59));
+
+      expect(segments, hasLength(1));
+      expect(segments.single.type, 'OUTBOUND_TRAVEL');
+      expect(segments.single.distanceM, 1750);
+      expect(segments.single.travelMode, TravelMode.car);
+    });
+
+    test('daySummaries parses the daily slice, leaving fields the backend doesn\'t compute at their defaults',
+        () async {
+      final client = MockClient((request) async => _json(journeyTimelineJson()));
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final daily = await api.daySummaries(
+          from: DateTime.utc(2026, 8, 13), to: DateTime.utc(2026, 8, 13, 23, 59, 59));
+
+      expect(daily, hasLength(1));
+      expect(daily.single.totalDistanceM, 1750);
+      expect(daily.single.travelTimeS, 1800);
+      // Not in DailySummaryDto — the backend deliberately skips the Planning/Visits cross-calls.
+      expect(daily.single.visitsPlanned, 0);
+      expect(daily.single.attendanceStatus, isNull);
+    });
+
+    test('correctJourneyEvent posts occurredAt/reason and returns the updated event', () async {
+      http.Request? captured;
+      final client = MockClient((request) async {
+        captured = request;
+        return _json({
+          'id': 'e1',
+          'type': 'ARRIVE_CUSTOMER',
+          'occurredAt': '2026-08-13T09:28:00Z',
+          'localDate': '2026-08-13',
+          'detectionMethod': 'GEOFENCE',
+          'confidence': 0.9,
+          'status': 'CONFIRMED',
+          'isEstimated': false,
+          'originalOccurredAt': '2026-08-13T09:30:00Z',
+          'rowVersion': 1,
+        });
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final updated = await api.correctJourneyEvent(
+          'e1', DateTime.utc(2026, 8, 13, 9, 28), 'GPS lag — arrived earlier');
+
+      expect(captured!.method, 'POST');
+      expect(captured!.url.path, '/v1/tracking/events/e1/override');
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['reason'], 'GPS lag — arrived earlier');
+      expect(updated.originalOccurredAt, DateTime.utc(2026, 8, 13, 9, 30));
+    });
+
+    test('confirmJourneyEvent posts no body and returns the updated event', () async {
+      http.Request? captured;
+      final client = MockClient((request) async {
+        captured = request;
+        return _json({
+          'id': 'e1',
+          'type': 'ARRIVE_CUSTOMER',
+          'occurredAt': '2026-08-13T09:30:00Z',
+          'localDate': '2026-08-13',
+          'detectionMethod': 'GEOFENCE',
+          'confidence': 0.9,
+          'status': 'CONFIRMED',
+          'isEstimated': false,
+          'rowVersion': 1,
+        });
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final updated = await api.confirmJourneyEvent('e1');
+
+      expect(captured!.url.path, '/v1/tracking/events/e1/confirm');
+      expect(captured!.body, isEmpty);
+      expect(updated.status, EventStatus.confirmed);
+    });
+
+    test('addManualJourneyEvent(startReturn) posts to heading-home then reads the created event back',
+        () async {
+      final calls = <http.Request>[];
+      final occurredAt = DateTime.utc(2026, 8, 13, 17, 0);
+      final client = MockClient((request) async {
+        calls.add(request);
+        if (request.url.path == '/v1/tracking/heading-home') {
+          return http.Response('', 200);
+        }
+        // The follow-up read-back query.
+        return _json({
+          'userId': 'u1',
+          'from': '2026-08-13T16:59:00Z',
+          'to': '2026-08-13T17:01:00Z',
+          'events': [
+            {
+              'id': 'e-return',
+              'type': 'START_RETURN',
+              'occurredAt': occurredAt.toIso8601String(),
+              'localDate': '2026-08-13',
+              'detectionMethod': 'MANUAL',
+              'confidence': 1.0,
+              'status': 'CONFIRMED',
+              'isEstimated': false,
+              'rowVersion': 0,
+            },
+          ],
+          'segments': const [],
+          'anomalies': const [],
+          'daily': const [],
+        });
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final created = await api.addManualJourneyEvent(JourneyEvent(
+        id: 'ignored-client-side',
+        type: JourneyEventType.startReturn,
+        occurredAt: occurredAt,
+        status: EventStatus.confirmed,
+      ));
+
+      expect(calls.first.url.path, '/v1/tracking/heading-home');
+      expect(created.id, 'e-return');
+      expect(created.isManual, isTrue);
+    });
+
+    test('addManualJourneyEvent for any other type throws without calling the network', () async {
+      var callCount = 0;
+      final client = MockClient((request) async {
+        callCount++;
+        return http.Response('should not be called', 500);
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      await expectLater(
+        api.addManualJourneyEvent(JourneyEvent(
+          id: 'ignored',
+          type: JourneyEventType.arriveCustomer,
+          occurredAt: DateTime.utc(2026, 8, 13, 9, 30),
+          status: EventStatus.confirmed,
+        )),
+        throwsA(isA<ApiException>()),
+      );
+      expect(callCount, 0);
+    });
+
+    test('trackingHealth and friends stay unsupported — no backend counterpart exists', () async {
+      final client = MockClient((request) async => http.Response('should not be called', 500));
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      expect(api.trackingHealth, throwsA(isA<ApiException>()));
+      expect(api.isTrackingActive, throwsA(isA<ApiException>()));
     });
   });
 }

@@ -102,7 +102,7 @@ tests/                                   85 .NET tests (12 of them integration t
 
 ```bash
 dotnet test                    # 85 tests — needs Docker for XMobile.Api.Tests, nothing else
-cd app && flutter test         # 66 app tests — no device or emulator
+cd app && flutter test         # 74 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
@@ -128,10 +128,12 @@ of one provider. Location capture, share-intent receipts and permission dialogs 
 manually for now; the manual paths stay afterwards as fallbacks. See [app/README](app/README.md).
 
 **HttpApiClient** — the real `ApiClient` implementation, covering auth, customer reads,
-tours/plans, check-in/out and reports against the endpoints above; everything without a backend
-yet (opportunities, expenses, journey/tracking, most reference data) throws a catchable
-`ApiException` instead of pretending to work. `MockApiClient` stays the default provider until
-enough of that is backed — see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status).
+tours/plans, check-in/out, reports, and journey/tracking (events, segments, day summaries,
+corrections, confirmations, one manual-entry type) against the endpoints above; everything
+without a backend yet (opportunities, expenses, most reference data, device tracking-health)
+throws a catchable `ApiException` instead of pretending to work. `MockApiClient` stays the
+default provider until enough of that is backed — see
+[10 — Roadmap §6](docs/10-roadmap.md#6-build-status).
 
 **Local persistence** — the sync outbox and `HttpApiClient`'s session now survive an app restart.
 `AppDatabase` (`app/lib/core/db/`) is a Drift/SQLite database with the outbox as its first table;

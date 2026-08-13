@@ -336,15 +336,41 @@ Known gaps from this pass:
   there so the real sync engine (push/pull workers, conflict handling) doesn't need a migration
   the moment it lands.
 
+**`HttpApiClient`'s journey/tracking area is now backed**, following last increment's
+`XMobile.Tracking` module — 6 of its 10 `ApiClient` methods call the real backend:
+`journeyEvents`/`journeySegments`/`daySummaries` all call `GET /v1/tracking/journey` and each
+pick their slice out of one response (a disclosed inefficiency when two providers watch both
+events and segments — two identical requests fire rather than one; a caching layer is future
+work once there's a repository to put it in); `correctJourneyEvent`/`confirmJourneyEvent` map 1:1
+onto `POST /v1/tracking/events/{id}/override|confirm`; `addManualJourneyEvent` only really works
+for one of the app's six manual-entry types (`startReturn`, via `POST /v1/tracking/heading-home`,
+which returns no body so the created event is read back with a narrow follow-up query) — the
+other five (`departHome`, `arriveCustomer`, `departCustomer`, `arriveHome`, `overnightStopStart`)
+throw a specific `ApiException` naming what's actually unsupported, because the backend has no
+endpoint to create them at all yet. `trackingHealth`/`updateTrackingHealth`/`isTrackingActive`/
+`setTrackingActive` stay stubbed — confirmed via reading the backend that there's no counterpart
+to backfill against (device self-reported health has no `GET` endpoint; "is tracking active" is
+really a `TrackingSession.status` the `ApiClient` interface has no `sessionId` to look up), so
+this needs new backend endpoints, not just Dart-side wiring. `JourneyEvent`/`JourneySegment`/
+`DaySummary` gained `fromJson` (following `Tour.fromJson`'s existing static-method pattern);
+`placeName`/`customerId` on events/segments come back null (the backend gives `refType`/`refId`/
+`siteId`, not a resolved name), and `DaySummary`'s `visitsPlanned`/`visitsCompleted`/
+`trackingCoveragePct`/`attendanceStatus` come back at their defaults — both disclosed gaps that
+already existed backend-side, now visible client-side too. Verified by 8 new tests in
+`http_api_client_test.dart` — 74/74 Flutter tests passing.
+
 **Next**, in order:
 1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
    flows — needs a real device, which this environment doesn't have.
-2. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
-   journey/tracking, remaining reference data) as their backend modules get built, then flip
-   `apiClientProvider` to `HttpApiClient` as the default once coverage is complete enough.
+2. Backfill the remaining `ApiClient` stubs (opportunities, expenses/attachments, most reference
+   data) once their backend modules get built (Phase 3/3b) — journey/tracking is the only area
+   with a backend today. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage
+   is complete enough.
 3. Audit the non-UTC-offset `DateTimeOffset` gap noted in the Tracking section above across the
    rest of the API.
 4. Fix the pre-existing `main.dart` `CardTheme`/`CardThemeData` compile error and wire
    `HttpApiClient`/local persistence into an actual app bootstrap.
 5. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
    docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.
+6. New backend endpoints for device tracking-health/session-status, if the manager-visible health
+   score and pause/resume UI are to work against the live backend rather than staying local-only.

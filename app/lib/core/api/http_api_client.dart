@@ -11,6 +11,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../models/enums.dart';
 import '../models/models.dart';
 import 'api_client.dart';
 import 'token_store.dart';
@@ -447,27 +448,87 @@ class HttpApiClient implements ApiClient {
 
   // ---------------------------------------------------------------- journey / tracking
 
-  @override
-  Future<List<JourneyEvent>> journeyEvents({required DateTime from, required DateTime to}) =>
-      _notSupported();
+  /// `GET /v1/tracking/journey` returns events/segments/daily summaries together — the three
+  /// methods below each call this and pick their slice. That means two providers watching (say)
+  /// both `journeyEvents` and `journeySegments` fire two identical requests; a known, disclosed
+  /// inefficiency rather than a caching layer this pass — see docs/10-roadmap.md §6.
+  Future<Map<String, dynamic>> _journeyTimeline(DateTime from, DateTime to) async =>
+      await _send('GET', '/v1/tracking/journey', query: {
+        'from': from.toUtc().toIso8601String(),
+        'to': to.toUtc().toIso8601String(),
+      }) as Map<String, dynamic>;
 
   @override
-  Future<List<JourneySegment>> journeySegments({required DateTime from, required DateTime to}) =>
-      _notSupported();
+  Future<List<JourneyEvent>> journeyEvents({required DateTime from, required DateTime to}) async {
+    final json = await _journeyTimeline(from, to);
+    return (json['events'] as List).map((e) => JourneyEvent.fromJson(e as Map<String, dynamic>)).toList();
+  }
 
   @override
-  Future<List<DaySummary>> daySummaries({required DateTime from, required DateTime to}) => _notSupported();
+  Future<List<JourneySegment>> journeySegments({required DateTime from, required DateTime to}) async {
+    final json = await _journeyTimeline(from, to);
+    return (json['segments'] as List).map((e) => JourneySegment.fromJson(e as Map<String, dynamic>)).toList();
+  }
 
   @override
-  Future<JourneyEvent> addManualJourneyEvent(JourneyEvent event) => _notSupported();
+  Future<List<DaySummary>> daySummaries({required DateTime from, required DateTime to}) async {
+    final json = await _journeyTimeline(from, to);
+    return (json['daily'] as List).map((e) => DaySummary.fromJson(e as Map<String, dynamic>)).toList();
+  }
 
   @override
-  Future<JourneyEvent> correctJourneyEvent(String eventId, DateTime occurredAt, String reason) =>
-      _notSupported();
+  Future<JourneyEvent> addManualJourneyEvent(JourneyEvent event) async {
+    // POST /v1/tracking/heading-home is the only manual-creation endpoint the backend exposes —
+    // it always creates a START_RETURN event. The other 5 types a rep can pick in the UI
+    // (JourneyEventType.manualEntryTypes) have no backend endpoint to create them at all yet.
+    if (event.type != JourneyEventType.startReturn) {
+      throw ApiException('Recording "${event.type.label}" manually isn\'t available against the '
+          'live backend yet — only "${JourneyEventType.startReturn.label}" is supported so far');
+    }
+
+    await _send('POST', '/v1/tracking/heading-home',
+        body: {'occurredAt': event.occurredAt.toUtc().toIso8601String()});
+
+    // heading-home returns 200 with no body, so the event it created is located with a narrow
+    // follow-up query rather than trusting a synthesized client-side echo (the server, not the
+    // client, assigns the id).
+    final window = await _journeyTimeline(
+      event.occurredAt.subtract(const Duration(minutes: 1)),
+      event.occurredAt.add(const Duration(minutes: 1)),
+    );
+    final created = (window['events'] as List)
+        .map((e) => JourneyEvent.fromJson(e as Map<String, dynamic>))
+        .where((e) => e.type == JourneyEventType.startReturn)
+        .toList();
+    if (created.isEmpty) {
+      throw ApiException('The event was recorded but could not be read back');
+    }
+
+    return created.reduce((a, b) =>
+        (a.occurredAt.difference(event.occurredAt)).abs() <= (b.occurredAt.difference(event.occurredAt)).abs()
+            ? a
+            : b);
+  }
 
   @override
-  Future<JourneyEvent> confirmJourneyEvent(String eventId) => _notSupported();
+  Future<JourneyEvent> correctJourneyEvent(String eventId, DateTime occurredAt, String reason) async {
+    final json = await _send('POST', '/v1/tracking/events/$eventId/override',
+        body: {'occurredAt': occurredAt.toUtc().toIso8601String(), 'reason': reason}) as Map<String, dynamic>;
+    return JourneyEvent.fromJson(json);
+  }
 
+  @override
+  Future<JourneyEvent> confirmJourneyEvent(String eventId) async {
+    final json = await _send('POST', '/v1/tracking/events/$eventId/confirm') as Map<String, dynamic>;
+    return JourneyEvent.fromJson(json);
+  }
+
+  // trackingHealth/updateTrackingHealth/isTrackingActive/setTrackingActive have no backend
+  // counterpart at all (not merely unbuilt): TrackingHealth is a device self-report with no GET
+  // endpoint to read one back (device_heartbeat is write-only, nested inside POST /batch, and
+  // missing most of TrackingHealth's fields), and "is tracking active" is really a
+  // TrackingSession's status, which needs a sessionId ApiClient has nowhere to carry. Backfilling
+  // these needs new backend endpoints, not just wiring — see docs/10-roadmap.md §6.
   @override
   Future<TrackingHealth> trackingHealth() => _notSupported();
 
