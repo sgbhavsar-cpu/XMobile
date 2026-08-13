@@ -90,15 +90,15 @@ app/                                     Flutter app (built, runs on mock backen
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
 src/XMobile.Api, XMobile.Persistence,    the app's own backend (built): Phase 1 REST surface —
   Modules/XMobile.{Identity,Customers,     auth/device, customers (read), tours/plans,
-  Planning,Visits}/                        check-in/out, visit reports
+  Planning,Visits,Sync}/                   check-in/out, visit reports, and offline sync
 src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
 db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
-tests/                                   77 .NET tests (4 of them integration tests against a
+tests/                                   80 .NET tests (7 of them integration tests against a
                                           real Testcontainers Postgres+PostGIS)
 ```
 
 ```bash
-dotnet test                    # 77 tests — needs Docker for XMobile.Api.Tests, nothing else
+dotnet test                    # 80 tests — needs Docker for XMobile.Api.Tests, nothing else
 cd app && flutter test         # 52 app tests — no device or emulator
 ```
 
@@ -110,8 +110,9 @@ See [11 — Journey engine](docs/11-journey-engine.md).
 hand-mapped onto it, not the other way round). Modules talk through interfaces on
 `XMobile.Shared` rather than each other's tables or projects — see [08 — Backend
 structure](docs/08-backend-structure.md). Covers Phase 1's device/auth, customer reads, tours and
-visit plans, and check-in/out through report submission; `/v1/sync/*` and wiring the Flutter app
-to it are next (see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status)).
+visit plans, check-in/out through report submission, and the offline sync protocol
+(`/v1/sync/pull|push`, conflicts, health). Wiring the Flutter app to it is next (see
+[10 — Roadmap §6](docs/10-roadmap.md#6-build-status)).
 
 **XInfo gateway** — XInfo has no API, so we build one: REST for our backend, stored
 procedures into their SQL Server. Our own database is untouched by this and stays on

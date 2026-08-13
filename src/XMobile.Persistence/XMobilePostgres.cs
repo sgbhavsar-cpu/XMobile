@@ -34,6 +34,9 @@ public static class XMobilePostgres
         builder.MapEnum<VisitStatus>("visit.visit_status", NoOpNameTranslator);
         builder.MapEnum<CheckinMethod>("visit.checkin_method", NoOpNameTranslator);
         builder.MapEnum<TemplateStatus>("visit.template_status", NoOpNameTranslator);
+        builder.MapEnum<ChangeOp>("sync.change_op", NoOpNameTranslator);
+        builder.MapEnum<MutationOp>("sync.mutation_op", NoOpNameTranslator);
+        builder.MapEnum<MutationStatus>("sync.mutation_status", NoOpNameTranslator);
 
         return builder.Build();
     }
@@ -53,5 +56,8 @@ public static class XMobilePostgres
         modelBuilder.HasPostgresEnum<VisitStatus>("visit", "visit_status", NoOpNameTranslator);
         modelBuilder.HasPostgresEnum<CheckinMethod>("visit", "checkin_method", NoOpNameTranslator);
         modelBuilder.HasPostgresEnum<TemplateStatus>("visit", "template_status", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<ChangeOp>("sync", "change_op", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<MutationOp>("sync", "mutation_op", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<MutationStatus>("sync", "mutation_status", NoOpNameTranslator);
     }
 }

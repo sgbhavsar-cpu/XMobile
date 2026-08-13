@@ -13,6 +13,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCustomersModule(this IServiceCollection services)
     {
         services.AddScoped<ISiteLookup, SiteLookupService>();
+        services.AddScoped<ICustomerScopeService, CustomerScopeService>();
+        services.AddScoped<ISyncEntityHandler, CustomerAccountSyncHandler>();
+        services.AddScoped<ISyncEntityHandler, CustomerSiteSyncHandler>();
         services.AddPersistenceModule<CustomersModuleMarker>();
         return services;
     }

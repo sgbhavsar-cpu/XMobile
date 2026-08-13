@@ -25,3 +25,9 @@ public enum VisitStatus { CHECKED_IN, CHECKED_OUT, REPORT_SUBMITTED, VOIDED }
 public enum CheckinMethod { GEOFENCE, MANUAL, QR, NFC, REMOTE }
 
 public enum TemplateStatus { DRAFT, PUBLISHED, RETIRED }
+
+public enum ChangeOp { UPSERT, DELETE, SCOPE_REMOVE }
+
+public enum MutationOp { INSERT, UPDATE, DELETE }
+
+public enum MutationStatus { APPLIED, DUPLICATE, CONFLICT, REJECTED, DEFERRED }

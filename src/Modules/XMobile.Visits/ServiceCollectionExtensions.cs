@@ -13,6 +13,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddVisitsModule(this IServiceCollection services)
     {
         services.AddScoped<IVisitLookup, VisitLookupService>();
+        services.AddScoped<ISyncEntityHandler, VisitSyncHandler>();
+        services.AddScoped<ISyncEntityHandler, VisitReportSyncHandler>();
+        services.AddScoped<ISyncEntityHandler, FormTemplateSyncHandler>();
         services.AddPersistenceModule<VisitsModuleMarker>();
         return services;
     }

@@ -172,15 +172,42 @@ Known gaps from this pass, worth closing before the next one:
 - No FluentValidation pipeline yet (`docs/08-backend-structure.md`'s stated choice) — only the
   invariants exercised by the tests are enforced by hand (`DomainValidationException`).
 
+**The offline sync protocol (`/v1/sync/*`) now exists** (`src/Modules/XMobile.Sync`) — delta
+`pull` (cursor over `sync.change_log`, scoped to the rep's own rows and assigned customers),
+idempotent `push` (the `sync.client_mutation` ledger, optimistic concurrency via `baseVersion`,
+conflicts recorded to `sync.sync_conflict`), `GET /v1/sync/conflicts` and
+`POST /v1/sync/conflicts/{id}/resolve`, and `GET /v1/sync/health`. Wired for 8 entities across
+the existing modules (`customer.customer_account`/`customer_site`, `planning.tour`/`tour_day`/
+`visit_plan`, `visit.visit`/`visit_report`/`form_template`) via one more small `XMobile.Shared`
+port, `ISyncEntityHandler` — the module owning a table implements it, `XMobile.Sync` dispatches
+on `entity` without referencing any of those modules' projects, same shape as `IVisitLookup` and
+friends. Verified by 3 more integration tests (pull scoping between two reps, a push that creates
+a `visit_plan` purely from its payload, a stale push that conflicts and is resolved
+`KEEP_CLIENT`) — 80/80 passing.
+
+Known gaps from this pass:
+- `GET /v1/sync/bootstrap` (NDJSON full download for a brand-new device) isn't built — pull's
+  cursor mechanism was the part worth proving first.
+- Reference data (`config.visit_type` etc.) and the identity self-row tables
+  (`app_user`/`device`/`user_home_location`) aren't wired into sync — no EF entities exist for
+  the `config.*` tables in any module yet.
+- `DEFERRED` (docs/04 §3.2's dependency-ordering) is approximated by catching a foreign-key
+  violation, not a real dependency scheduler — good enough to unblock a mutation pushed before
+  its parent, not a general solution.
+- **Push does not replay the side-effects the dedicated REST endpoints have** (check-in
+  completing a visit plan, server-computed geofence distance) — an offline device is expected to
+  have computed those itself from its cached working set and push the finished row. A fuller
+  implementation would route push through the same application-layer commands the REST endpoints
+  use.
+- `GET /v1/sync/health` takes an explicit `deviceId` query parameter not in `api/openapi.yaml` —
+  the dev-JWT stub carries no `device_id` claim the way a real Keycloak token would.
+
 **Next**, in order:
-1. `/v1/sync/pull` and `/v1/sync/push` — the offline protocol in
-   [04 — Offline sync](04-offline-sync.md), reading `sync.change_log` and the per-entity conflict
-   policy table. Substantial enough to be its own pass rather than an add-on to this one.
-2. `HttpApiClient` — implement the existing Flutter `ApiClient` contract against the endpoints
-   that now exist. `MockApiClient` stays the default provider until coverage is complete; the
-   Dart `Visit`/`Tour`/`VisitPlan` models need a `rowVersion` field first for optimistic
-   concurrency on writes.
-3. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
+1. `HttpApiClient` — implement the existing Flutter `ApiClient` contract against the endpoints
+   that now exist, including sync. `MockApiClient` stays the default provider until coverage is
+   complete; the Dart `Visit`/`Tour`/`VisitPlan` models need a `rowVersion` field first for
+   optimistic concurrency on writes.
+2. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
    pure core).
-4. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
-5. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.
+3. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
+4. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.
