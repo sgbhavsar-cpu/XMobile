@@ -1,35 +1,44 @@
 # XMobile — Flutter app
 
-The field app. Runs today against an **in-memory backend**, so every screen and form can be
-used and tested before the API exists.
+The field app. Runs by default against an **in-memory backend** (`MockApiClient`), so every
+screen and form can be used and tested regardless of backend progress. A real
+`HttpApiClient` (`lib/core/api/http_api_client.dart`) now exists and talks to the ASP.NET Core
+backend in `src/XMobile.Api` — see "What is real and what is stubbed" below for exactly how much
+of it that covers today. It isn't the default provider yet; swap it in per the override below.
 
 ```bash
 cd app
 flutter pub get
 flutter run          # any employee code + a 4-character password signs you in
-flutter test         # 52 tests, no device or emulator needed
+flutter test         # 59 tests, no device or emulator needed
 flutter analyze
 ```
 
 ## How it talks to the backend
 
 ```
-screens ─► repositories/providers ─► ApiClient (interface) ─► MockApiClient (in memory)
-                                                           └► HttpApiClient (later)
+screens ─► repositories/providers ─► ApiClient (interface) ─► MockApiClient (default, in memory)
+                                                           └► HttpApiClient (real backend, built but opt-in)
 ```
 
-`ApiClient` (`lib/core/api/api_client.dart`) mirrors `api/openapi.yaml` exactly. Connecting to
-the real service is an override of **one provider**:
+`ApiClient` (`lib/core/api/api_client.dart`) mirrors `api/openapi.yaml` closely — `HttpApiClient`
+also calls a couple of endpoints not yet in that spec (`PUT /v1/auth/home`,
+`GET /v1/plans/{id}`; see `docs/10-roadmap.md §6`) where the interface needed one to exist at
+all. Connecting to the real service is an override of **one provider**:
 
 ```dart
 ProviderScope(
-  overrides: [apiClientProvider.overrideWithValue(HttpApiClient(baseUrl))],
+  overrides: [apiClientProvider.overrideWithValue(HttpApiClient(baseUrl: 'https://xmobile.internal/api'))],
   child: const XMobileApp(),
 )
 ```
 
-No screen, form or repository changes. The mock deliberately models two things a naive stub
-would not, because both change how the UI must behave:
+No screen, form or repository changes — though about half of `ApiClient`'s methods
+(opportunities, expenses, journey/tracking, most reference-data lookups) have no backend yet and
+`HttpApiClient` throws a catchable `ApiException` for those rather than pretending to work; a
+screen exercising one of them will show an error instead of the mock's data until its module is
+built server-side. The mock deliberately models two things a naive stub would not, because both
+change how the UI must behave:
 
 - **latency** — every call takes a beat, so loading states are real and get exercised;
 - **connectivity** — `offline` makes calls throw `OfflineException`, which is how the outbox,
@@ -57,7 +66,7 @@ the typing in the common case.
 lib/
   app/            router, shell, theme
   core/
-    api/          ApiClient contract, MockApiClient, seed data
+    api/          ApiClient contract, MockApiClient, HttpApiClient, seed data
     models/       domain models + enums mirroring the API
     state/        Riverpod providers, offline outbox
     ui/           form fields, status chips, async/error/empty states

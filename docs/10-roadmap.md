@@ -165,8 +165,8 @@ flow against a real Testcontainers Postgres+PostGIS instance (`tests/XMobile.Api
 of the existing 73.
 
 Known gaps from this pass, worth closing before the next one:
-- No endpoint yet to create/update a rep's home location, which `POST /v1/tours` requires —
-  `api/openapi.yaml` doesn't define one either. Tests seed it directly via `XMobileDbContext`.
+- ~~No endpoint yet to create/update a rep's home location~~ — added (`PUT /v1/auth/home`) in the
+  `HttpApiClient` pass below, since nothing could plan a single tour through the real API without it.
 - `customerName`/`siteName` are left null on `VisitPlan`/`Visit` responses — populating them needs
   a small lookup this pass didn't wire up (the data lives in `XMobile.Customers`).
 - No FluentValidation pipeline yet (`docs/08-backend-structure.md`'s stated choice) — only the
@@ -202,12 +202,43 @@ Known gaps from this pass:
 - `GET /v1/sync/health` takes an explicit `deviceId` query parameter not in `api/openapi.yaml` —
   the dev-JWT stub carries no `device_id` claim the way a real Keycloak token would.
 
+**`HttpApiClient` now exists** (`app/lib/core/api/http_api_client.dart`) — the first real
+implementation of the Flutter app's `ApiClient` interface, alongside `MockApiClient`. Of the
+interface's 47 methods, ~20 (auth, customer reads, tours/plans, check-in/out, reports, form
+templates) call the real backend with hand-written JSON mapping both ways; the remaining ~27
+(opportunities, expenses/attachments, journey/tracking, most reference-data lookups) have no
+backend yet and throw a catchable `ApiException('Not yet available in the live backend')` rather
+than pretending to work. `MockApiClient` stays the default `apiClientProvider` until enough of
+those are backed that flipping the switch wouldn't break screens outright. Six Dart models
+(`Customer`, `CustomerSite`, `Tour`, `VisitPlan`, `Visit`, `VisitReport`) gained a nullable
+`rowVersion` — null means "not yet saved," which `saveTour`/`saveVisitPlan` use to decide create
+vs. update. Two small backend additions were needed to make the interface satisfiable at all:
+`PUT /v1/auth/home` (nothing else could ever set a rep's home location, so no tour could ever be
+planned through the real API) and `GET /v1/plans/{id}` (`skipVisitPlan` returns the updated plan
+but takes only its id, with no date range to search `/v1/plans` by). Both are disclosed
+deviations from `api/openapi.yaml`, same treatment as the existing `/dev/login` stub. Verified by
+7 new Flutter unit tests against a fake `http.Client` (`app/test/http_api_client_test.dart`) —
+signIn's token flows into the following calls, problem+json error mapping, a network failure
+mapping to `OfflineException`, a `TourDetail` response correctly dropping into the leaner `Tour`
+model — 59/59 Flutter tests and 81/81 .NET tests passing.
+
+Known gaps from this pass:
+- `checkInPoint`/`checkOutPoint`/`checkInMethod`/`contactId`/`outOfFenceReasonCode`/
+  `outOfFenceRemark`/`photoIds` come back empty on a `Visit` read from the server — the read DTO
+  (`VisitSummary`) is intentionally lean and doesn't carry them; only what was captured locally
+  at check-in time has them.
+- `saveVisitPlan` on an *existing* plan (non-null `rowVersion`) throws — there is no
+  `PATCH /v1/plans/{id}` yet, only create and skip.
+- The device id `HttpApiClient` registers is regenerated every app start (no local database to
+  persist it in yet), and the bearer token lives in memory only — expected to be revisited once
+  local persistence (Drift/SQLCipher) lands.
+
 **Next**, in order:
-1. `HttpApiClient` — implement the existing Flutter `ApiClient` contract against the endpoints
-   that now exist, including sync. `MockApiClient` stays the default provider until coverage is
-   complete; the Dart `Visit`/`Tour`/`VisitPlan` models need a `rowVersion` field first for
-   optimistic concurrency on writes.
-2. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
+1. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
    pure core).
-3. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
-4. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state.
+2. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
+3. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state
+   — and giving `HttpApiClient` somewhere to persist its token/device id across restarts.
+4. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
+   journey/tracking, remaining reference data) as their backend modules get built, then flip
+   `apiClientProvider` to `HttpApiClient` as the default once coverage is complete enough.

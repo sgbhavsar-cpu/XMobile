@@ -8,6 +8,11 @@ import 'package:collection/collection.dart';
 
 import 'enums.dart';
 
+/// "yyyy-MM-dd" — how the backend's `DateOnly` fields serialize; `toIso8601String()` would
+/// include a time-of-day the server doesn't expect for these.
+String _dateOnly(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
 // ---------------------------------------------------------------- primitives
 
 class GeoPoint {
@@ -74,6 +79,20 @@ class AppUser {
   final String? managerName;
 
   bool get isManager => roles.contains('MANAGER');
+
+  /// Mirrors `MeResult` (`GET /v1/auth/me`). `email`/`phone`/`grade`/`managerName` aren't
+  /// returned by that endpoint today — a disclosed gap, not a parsing bug.
+  static AppUser fromJson(Map<String, dynamic> json) {
+    final orgUnit = json['orgUnit'] as Map<String, dynamic>?;
+    return AppUser(
+      id: json['userId'] as String,
+      employeeCode: json['employeeCode'] as String,
+      fullName: json['fullName'] as String,
+      roles: (json['roles'] as List).cast<String>(),
+      homeLocation: HomeLocation.fromJson(json['homeLocation'] as Map<String, dynamic>?),
+      orgUnitName: orgUnit == null ? null : orgUnit['name'] as String?,
+    );
+  }
 }
 
 class HomeLocation {
@@ -102,6 +121,26 @@ class HomeLocation {
         city: city ?? this.city,
         addressLine1: addressLine1 ?? this.addressLine1,
       );
+
+  /// Mirrors `HomeLocationDto` (api/openapi.yaml doesn't define this shape yet — see
+  /// `PUT /v1/auth/home` in AuthEndpoints.cs). `addressLine1` isn't returned by that endpoint.
+  static HomeLocation? fromJson(Map<String, dynamic>? json) => json == null
+      ? null
+      : HomeLocation(
+          id: json['id'] as String,
+          label: json['label'] as String,
+          point: GeoPoint.fromJson(json['point'] as Map<String, dynamic>?)!,
+          geofenceRadiusM: json['geofenceRadiusM'] as int,
+          city: json['city'] as String?,
+        );
+
+  /// Request body for `PUT /v1/auth/home`.
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'point': point.toJson(),
+        'geofenceRadiusM': geofenceRadiusM,
+        if (city != null) 'city': city,
+      };
 }
 
 // ---------------------------------------------------------------- customers
@@ -121,6 +160,7 @@ class Customer {
     this.contacts = const [],
     this.isFieldCreated = false,
     this.rejectionReason,
+    this.rowVersion,
   });
 
   final String id;
@@ -137,11 +177,35 @@ class Customer {
   final bool isFieldCreated;
   final String? rejectionReason;
 
+  /// Optimistic-concurrency token from the live backend; null for anything MockApiClient
+  /// created or a not-yet-synced local object.
+  final int? rowVersion;
+
   CustomerSite? get primarySite =>
       sites.firstWhereOrNull((s) => s.isPrimary) ?? sites.firstOrNull;
 
   /// A prospect is visitable immediately — that is the whole point of proposing it.
   bool get isVisitable => lifecycleStatus != AccountLifecycle.rejected;
+
+  /// Mirrors `CustomerDto` (`GET /v1/customers`, `GET /v1/customers/{id}`). That DTO doesn't
+  /// carry `lifecycleStatus`, `email`, `gstNumber`, `isFieldCreated` or `contacts` — defaults
+  /// apply (a disclosed gap, not a parsing bug).
+  static Customer fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String;
+    return Customer(
+      id: id,
+      name: json['name'] as String,
+      lifecycleStatus: AccountLifecycle.active,
+      xinfoId: json['xinfoId'] as String?,
+      accountType: json['accountType'] as String?,
+      category: json['category'] as String?,
+      phone: json['phone'] as String?,
+      sites: (json['sites'] as List? ?? const [])
+          .map((s) => CustomerSite.fromJson(s as Map<String, dynamic>, customerId: id))
+          .toList(),
+      rowVersion: json['rowVersion'] as int?,
+    );
+  }
 
   Customer copyWith({
     String? name,
@@ -169,6 +233,7 @@ class Customer {
         contacts: contacts ?? this.contacts,
         isFieldCreated: isFieldCreated,
         rejectionReason: rejectionReason ?? this.rejectionReason,
+        rowVersion: rowVersion,
       );
 }
 
@@ -185,6 +250,7 @@ class CustomerSite {
     this.state,
     this.postalCode,
     this.isPrimary = false,
+    this.rowVersion,
   });
 
   final String id;
@@ -198,11 +264,27 @@ class CustomerSite {
   final String? state;
   final String? postalCode;
   final bool isPrimary;
+  final int? rowVersion;
 
   bool get hasLocation => point != null;
 
   String get addressSummary =>
       [addressLine1, city, state].where((s) => s != null && s.isNotEmpty).join(', ');
+
+  /// Mirrors `CustomerSiteDto`, nested under a customer — the DTO itself carries no
+  /// `customerId`, so the caller (`Customer.fromJson`) supplies it.
+  static CustomerSite fromJson(Map<String, dynamic> json, {required String customerId}) => CustomerSite(
+        id: json['id'] as String,
+        customerId: customerId,
+        name: json['name'] as String,
+        point: GeoPoint.fromJson(json['point'] as Map<String, dynamic>?),
+        geoSource: GeoSource.fromWire(json['geoSource'] as String?),
+        geofenceRadiusM: json['geofenceRadiusM'] as int? ?? 150,
+        addressLine1: json['addressLine1'] as String?,
+        city: json['city'] as String?,
+        isPrimary: json['isPrimary'] as bool? ?? false,
+        rowVersion: json['rowVersion'] as int?,
+      );
 
   CustomerSite copyWith({
     String? name,
@@ -227,6 +309,7 @@ class CustomerSite {
         state: state ?? this.state,
         postalCode: postalCode ?? this.postalCode,
         isPrimary: isPrimary ?? this.isPrimary,
+        rowVersion: rowVersion,
       );
 }
 
@@ -281,6 +364,22 @@ class Customer360 {
   /// Cached XInfo data is shown with its age — a stale balance presented as current
   /// is worse than showing none.
   final DateTime? salesAsOf;
+
+  /// Mirrors `Customer360Dto` (`GET /v1/customers/{id}/summary`).
+  static Customer360 fromJson(Map<String, dynamic> json) => Customer360(
+        customerId: json['customerId'] as String,
+        name: json['name'] as String,
+        lifecycleStatus: AccountLifecycle.fromWire(json['lifecycleStatus'] as String),
+        category: json['category'] as String?,
+        siteCount: json['siteCount'] as int? ?? 0,
+        lastVisitAt: json['lastVisitAt'] == null ? null : DateTime.parse(json['lastVisitAt'] as String),
+        visits90d: json['visits90d'] as int? ?? 0,
+        sales12m: (json['sales12m'] as num?)?.toDouble() ?? 0,
+        lastOrderDate: json['lastOrderDate'] == null ? null : DateTime.parse(json['lastOrderDate'] as String),
+        openOpportunities: json['openOpportunities'] as int? ?? 0,
+        openPipelineValue: (json['openPipelineValue'] as num?)?.toDouble() ?? 0,
+        salesAsOf: json['salesAsOf'] == null ? null : DateTime.parse(json['salesAsOf'] as String),
+      );
 }
 
 class SalesHistoryItem {
@@ -301,6 +400,17 @@ class SalesHistoryItem {
   final String? documentNo;
   final String? status;
   final String? summary;
+
+  /// Mirrors `SalesHistoryItemDto` (`GET /v1/customers/{id}/history`'s `sales[]`).
+  static SalesHistoryItem fromJson(Map<String, dynamic> json) => SalesHistoryItem(
+        id: json['id'] as String,
+        documentType: json['documentType'] as String,
+        documentDate: DateTime.parse(json['documentDate'] as String),
+        amount: (json['amount'] as num).toDouble(),
+        documentNo: json['documentNo'] as String?,
+        status: json['status'] as String?,
+        summary: json['summary'] as String?,
+      );
 }
 
 // ---------------------------------------------------------------- opportunities
@@ -445,6 +555,7 @@ class Tour {
     this.totalDistanceM = 0,
     this.totalVisits = 0,
     this.totalExpenseAmount = 0,
+    this.rowVersion,
   });
 
   final String id;
@@ -461,9 +572,39 @@ class Tour {
   final int totalVisits;
   final double totalExpenseAmount;
 
+  /// Null means "not yet saved to the live backend" — HttpApiClient.saveTour uses this to
+  /// decide POST (create) vs PATCH (update).
+  final int? rowVersion;
+
   bool get isSingleDay => plannedStartDate == plannedEndDate;
 
   int get dayCount => plannedEndDate.difference(plannedStartDate).inDays + 1;
+
+  /// Mirrors `TourDto` (`GET /v1/tours`) — `days` stays empty from that list endpoint. When
+  /// parsing a `TourDetailDto` (`GET /v1/tours/{id}`), pass its `days` array too; `plans`/
+  /// `visits` are dropped (the app fetches those separately via `visitPlans()`/history).
+  static Tour fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String;
+    return Tour(
+        id: id,
+        title: json['title'] as String,
+        plannedStartDate: DateTime.parse(json['plannedStartDate'] as String),
+        plannedEndDate: DateTime.parse(json['plannedEndDate'] as String),
+        status: TourStatus.fromWire(json['status'] as String),
+        purpose: json['purpose'] as String?,
+        destinationCity: json['destinationCity'] as String?,
+        actualStartAt: json['actualStartAt'] == null ? null : DateTime.parse(json['actualStartAt'] as String),
+        actualEndAt: json['actualEndAt'] == null ? null : DateTime.parse(json['actualEndAt'] as String),
+        days: (json['days'] as List?)
+                ?.map((d) => TourDay.fromJson(d as Map<String, dynamic>, tourId: id))
+                .toList() ??
+            const [],
+        totalDistanceM: json['totalDistanceM'] as int? ?? 0,
+        totalVisits: json['totalVisits'] as int? ?? 0,
+        totalExpenseAmount: (json['totalExpenseAmount'] as num?)?.toDouble() ?? 0,
+        rowVersion: json['rowVersion'] as int?,
+      );
+  }
 
   Tour copyWith({
     String? title,
@@ -490,6 +631,7 @@ class Tour {
         totalDistanceM: totalDistanceM,
         totalVisits: totalVisits,
         totalExpenseAmount: totalExpenseAmount,
+        rowVersion: rowVersion,
       );
 }
 
@@ -517,6 +659,22 @@ class TourDay {
   final TravelMode? plannedTravelMode;
   final String? overnightCity;
   final String? notes;
+
+  /// Mirrors `TourDayDto`, nested under a tour — the DTO carries no `tourId`, so
+  /// `Tour.fromJson` supplies it explicitly.
+  static TourDay fromJson(Map<String, dynamic> json, {String tourId = ''}) => TourDay(
+        id: json['id'] as String,
+        tourId: tourId,
+        planDate: DateTime.parse(json['planDate'] as String),
+        daySeq: json['daySeq'] as int,
+        activityType: DayActivity.fromWire(json['activityType'] as String),
+        fromCity: json['fromCity'] as String?,
+        toCity: json['toCity'] as String?,
+        plannedTravelMode:
+            json['plannedTravelMode'] == null ? null : TravelMode.fromWire(json['plannedTravelMode'] as String?),
+        overnightCity: json['overnightCity'] as String?,
+        notes: json['notes'] as String?,
+      );
 
   TourDay copyWith({
     DayActivity? activityType,
@@ -559,6 +717,7 @@ class VisitPlan {
     this.skipReasonCode,
     this.skipRemark,
     this.isBaseline = true,
+    this.rowVersion,
   });
 
   final String id;
@@ -578,6 +737,30 @@ class VisitPlan {
   final String? skipReasonCode;
   final String? skipRemark;
   final bool isBaseline;
+
+  /// Null means "not yet saved to the live backend" — HttpApiClient.saveVisitPlan uses this to
+  /// decide create vs update.
+  final int? rowVersion;
+
+  /// Mirrors `VisitPlanDto`. `customerName`/`siteName` come back empty — that DTO doesn't
+  /// carry them yet (a disclosed gap from the backend pass, not a parsing bug).
+  static VisitPlan fromJson(Map<String, dynamic> json) => VisitPlan(
+        id: json['id'] as String,
+        customerId: json['customerId'] as String,
+        customerName: json['customerName'] as String? ?? '',
+        siteId: json['siteId'] as String,
+        siteName: json['siteName'] as String? ?? '',
+        visitTypeCode: json['visitTypeCode'] as String,
+        plannedDate: DateTime.parse(json['plannedDate'] as String),
+        status: PlanStatus.fromWire(json['status'] as String),
+        tourId: json['tourId'] as String?,
+        tourDayId: json['tourDayId'] as String?,
+        plannedStartTime: json['plannedStartTime'] as String?,
+        seq: json['seq'] as int? ?? 1,
+        objective: json['objective'] as String?,
+        isBaseline: json['isBaseline'] as bool? ?? true,
+        rowVersion: json['rowVersion'] as int?,
+      );
 
   VisitPlan copyWith({
     PlanStatus? status,
@@ -606,6 +789,7 @@ class VisitPlan {
         skipReasonCode: skipReasonCode ?? this.skipReasonCode,
         skipRemark: skipRemark ?? this.skipRemark,
         isBaseline: isBaseline,
+        rowVersion: rowVersion,
       );
 }
 
@@ -635,6 +819,7 @@ class Visit {
     this.isUnplanned = false,
     this.autoClosed = false,
     this.photoIds = const [],
+    this.rowVersion,
   });
 
   final String id;
@@ -659,10 +844,34 @@ class Visit {
   final bool isUnplanned;
   final bool autoClosed;
   final List<String> photoIds;
+  final int? rowVersion;
 
   Duration? get duration => checkOutAt?.difference(checkInAt);
 
   bool get isOpen => status == VisitStatus.checkedIn;
+
+  /// Mirrors `VisitSummary`/`Visit` (check-in/check-out/list responses). That read shape
+  /// doesn't carry `checkInPoint`/`checkOutPoint`/`checkInMethod`/`contactId`/
+  /// `outOfFenceReasonCode`/`outOfFenceRemark`/`photoIds` — a device that checked in offline
+  /// still has those locally; this is what comes back from the server afterwards.
+  static Visit fromJson(Map<String, dynamic> json) => Visit(
+        id: json['id'] as String,
+        customerId: json['customerId'] as String,
+        customerName: json['customerName'] as String? ?? '',
+        siteId: json['siteId'] as String,
+        siteName: json['siteName'] as String? ?? '',
+        visitTypeCode: json['visitTypeCode'] as String,
+        checkInAt: DateTime.parse(json['checkInAt'] as String),
+        status: VisitStatus.fromWire(json['status'] as String),
+        visitPlanId: json['visitPlanId'] as String?,
+        tourId: json['tourId'] as String?,
+        checkInDistanceM: json['checkInDistanceM'] as int?,
+        isOutOfGeofence: json['isOutOfGeofence'] as bool? ?? false,
+        checkOutAt: json['checkOutAt'] == null ? null : DateTime.parse(json['checkOutAt'] as String),
+        isUnplanned: json['isUnplanned'] as bool? ?? false,
+        autoClosed: json['autoClosed'] as bool? ?? false,
+        rowVersion: json['rowVersion'] as int?,
+      );
 
   Visit copyWith({
     VisitStatus? status,
@@ -694,6 +903,7 @@ class Visit {
         isUnplanned: isUnplanned,
         autoClosed: autoClosed,
         photoIds: photoIds ?? this.photoIds,
+        rowVersion: rowVersion,
       );
 }
 
@@ -718,6 +928,7 @@ class VisitReport {
     this.answers = const {},
     this.isDraft = true,
     this.submittedAt,
+    this.rowVersion,
   });
 
   final String visitId;
@@ -742,6 +953,52 @@ class VisitReport {
 
   final bool isDraft;
   final DateTime? submittedAt;
+  final int? rowVersion;
+
+  /// Mirrors `VisitReportDto` (`GET /v1/visits/{id}/report`).
+  static VisitReport fromJson(Map<String, dynamic> json) => VisitReport(
+        visitId: json['visitId'] as String,
+        templateCode: json['templateCode'] as String?,
+        templateVersion: json['templateVersion'] as int?,
+        outcomeCode: json['outcomeCode'] as String?,
+        summary: json['summary'] as String?,
+        discussionPoints: json['discussionPoints'] as String?,
+        nextAction: json['nextAction'] as String?,
+        followUpDate: json['followUpDate'] == null ? null : DateTime.parse(json['followUpDate'] as String),
+        orderIntent: json['orderIntent'] as bool? ?? false,
+        orderValueEst: (json['orderValueEst'] as num?)?.toDouble(),
+        competitorSeen: json['competitorSeen'] as bool? ?? false,
+        competitorNotes: json['competitorNotes'] as String?,
+        customerSentiment: json['customerSentiment'] as int?,
+        contactMetId: json['contactMetId'] as String?,
+        contactMetName: json['contactMetName'] as String?,
+        answers: (json['answers'] as Map<String, dynamic>?) ?? const {},
+        isDraft: json['isDraft'] as bool? ?? true,
+        submittedAt: json['submittedAt'] == null ? null : DateTime.parse(json['submittedAt'] as String),
+        rowVersion: json['rowVersion'] as int?,
+      );
+
+  /// Request body for `PUT /v1/visits/{visitId}/report` (`VisitReportUpsertRequest`).
+  /// `submit` isn't a model field — the caller (`HttpApiClient.saveVisitReport`) passes it.
+  Map<String, dynamic> toJson({required bool submit}) => {
+        if (templateCode != null) 'templateCode': templateCode,
+        if (templateVersion != null) 'templateVersion': templateVersion,
+        if (outcomeCode != null) 'outcomeCode': outcomeCode,
+        if (summary != null) 'summary': summary,
+        if (discussionPoints != null) 'discussionPoints': discussionPoints,
+        if (nextAction != null) 'nextAction': nextAction,
+        if (followUpDate != null) 'followUpDate': _dateOnly(followUpDate!),
+        'orderIntent': orderIntent,
+        if (orderValueEst != null) 'orderValueEst': orderValueEst,
+        'competitorSeen': competitorSeen,
+        if (competitorNotes != null) 'competitorNotes': competitorNotes,
+        if (customerSentiment != null) 'customerSentiment': customerSentiment,
+        if (contactMetId != null) 'contactMetId': contactMetId,
+        if (contactMetName != null) 'contactMetName': contactMetName,
+        'answers': answers,
+        'submit': submit,
+        if (rowVersion != null) 'baseVersion': rowVersion,
+      };
 
   VisitReport copyWith({
     String? templateCode,
@@ -783,6 +1040,7 @@ class VisitReport {
         answers: answers ?? this.answers,
         isDraft: isDraft ?? this.isDraft,
         submittedAt: submittedAt ?? this.submittedAt,
+        rowVersion: rowVersion,
       );
 }
 

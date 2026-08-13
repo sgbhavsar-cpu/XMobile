@@ -59,3 +59,7 @@ public sealed record MeResult(
     bool ConsentRequired);
 
 public sealed record ConsentRequest(string PolicyCode, string PolicyVersion, bool Granted);
+
+/// <summary>Not in api/openapi.yaml — see `PUT /v1/auth/home` in AuthEndpoints.cs.</summary>
+public sealed record UpdateHomeLocationRequest(
+    string? Label, XMobile.Shared.GeoPoint Point, int? GeofenceRadiusM, string? City);

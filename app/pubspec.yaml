@@ -20,10 +20,15 @@ dependencies:
   uuid: ^4.5.1
   collection: ^1.18.0
 
-  # NOTE: deliberately no http client, database or location plugin yet.
-  # The app runs against an in-memory ApiClient so every screen and form can be
-  # exercised — and tested headlessly — before the backend exists. Swapping in the
-  # real implementations is a change to one provider (see lib/core/api/api_client.dart).
+  # HTTP client for HttpApiClient (lib/core/api/http_api_client.dart) — the first real
+  # ApiClient implementation, added once the backend existed to talk to. Deliberately the
+  # plain `http` package, not dio/chopper: plain JSON REST, no multipart/interceptor need yet.
+  http: ^1.2.2
+
+  # NOTE: still deliberately no local database or location plugin.
+  # MockApiClient stays the default provider until HttpApiClient covers enough of ApiClient
+  # that swapping in the real implementation (one provider override — see
+  # lib/core/api/api_client.dart) doesn't break screens that use the parts it doesn't yet.
 
 dev_dependencies:
   flutter_test:

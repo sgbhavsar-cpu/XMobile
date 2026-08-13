@@ -26,6 +26,9 @@ public static class TourEndpoints
 
         var plans = app.MapGroup("/v1/plans").WithTags("Tours").RequireAuthorization();
         plans.MapGet("", ListPlansAsync);
+        // Not in api/openapi.yaml — added so HttpApiClient.skipVisitPlan (which only takes a
+        // planId, no date range to search /v1/plans with) has something to return.
+        plans.MapGet("/{id:guid}", GetPlanAsync);
         plans.MapPost("/{id:guid}/skip", SkipPlanAsync);
 
         return app;
@@ -210,6 +213,14 @@ public static class TourEndpoints
             .OrderBy(p => p.PlannedDate).ThenBy(p => p.Seq)
             .ToListAsync(ct);
         return Results.Ok(results.Select(ToPlanDto));
+    }
+
+    private static async Task<IResult> GetPlanAsync(
+        Guid id, XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
+    {
+        var plan = await db.Set<VisitPlan>().FirstOrDefaultAsync(p => p.Id == id && p.UserId == currentUser.UserId, ct)
+                  ?? throw new NotFoundException("Visit plan not found");
+        return Results.Ok(ToPlanDto(plan));
     }
 
     private static async Task<IResult> SkipPlanAsync(

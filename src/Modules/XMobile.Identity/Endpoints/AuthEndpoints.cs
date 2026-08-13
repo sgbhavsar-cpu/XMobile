@@ -23,6 +23,10 @@ public static class AuthEndpoints
         auth.MapPost("/device", RegisterDeviceAsync);
         auth.MapGet("/me", GetMeAsync);
         auth.MapPost("/consent", RecordConsentAsync);
+        // Not in api/openapi.yaml — same disclosed-deviation treatment as /dev/login. Without
+        // it there is no way at all to set the home location POST /v1/tours requires (see the
+        // HttpApiClient plan's scope decision).
+        auth.MapPut("/home", UpdateHomeLocationAsync);
 
         return app;
     }
@@ -136,6 +140,44 @@ public static class AuthEndpoints
             user.ShiftEnd.ToString("HH:mm"),
             user.WorkingDays,
             !hasConsent));
+    }
+
+    private static async Task<IResult> UpdateHomeLocationAsync(
+        UpdateHomeLocationRequest request, XMobileDbContext db, ICurrentUser currentUser, IClock clock,
+        CancellationToken ct)
+    {
+        var label = string.IsNullOrWhiteSpace(request.Label) ? "Home" : request.Label;
+        var radius = request.GeofenceRadiusM is > 0 ? request.GeofenceRadiusM.Value : 200;
+
+        var home = await db.Set<UserHomeLocation>()
+            .FirstOrDefaultAsync(h => h.UserId == currentUser.UserId && h.EffectiveTo == null, ct);
+
+        if (home is null)
+        {
+            home = new UserHomeLocation
+            {
+                UserId = currentUser.UserId,
+                Label = label,
+                Geog = request.Point.ToNtsPoint(),
+                GeofenceRadiusM = radius,
+                AccuracyM = request.Point.AccuracyM,
+                City = request.City,
+                EffectiveFrom = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime),
+            };
+            db.Add(home);
+        }
+        else
+        {
+            home.Label = label;
+            home.Geog = request.Point.ToNtsPoint();
+            home.GeofenceRadiusM = radius;
+            home.AccuracyM = request.Point.AccuracyM;
+            home.City = request.City ?? home.City;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new HomeLocationDto(
+            home.Id, home.Label, home.Geog.ToGeoPoint(), home.GeofenceRadiusM, home.City));
     }
 
     private static async Task<IResult> RecordConsentAsync(

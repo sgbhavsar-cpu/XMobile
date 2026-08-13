@@ -86,20 +86,22 @@ OpenAPI 3.1 outline: [`api/openapi.yaml`](api/openapi.yaml).
 ## Code
 
 ```
-app/                                     Flutter app (built, runs on mock backend)
+app/                                     Flutter app (built): every screen against
+                                          MockApiClient by default; HttpApiClient exists
+                                          and is tested, not yet the default provider
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
 src/XMobile.Api, XMobile.Persistence,    the app's own backend (built): Phase 1 REST surface —
   Modules/XMobile.{Identity,Customers,     auth/device, customers (read), tours/plans,
   Planning,Visits,Sync}/                   check-in/out, visit reports, and offline sync
 src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
 db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
-tests/                                   80 .NET tests (7 of them integration tests against a
+tests/                                   81 .NET tests (8 of them integration tests against a
                                           real Testcontainers Postgres+PostGIS)
 ```
 
 ```bash
-dotnet test                    # 80 tests — needs Docker for XMobile.Api.Tests, nothing else
-cd app && flutter test         # 52 app tests — no device or emulator
+dotnet test                    # 81 tests — needs Docker for XMobile.Api.Tests, nothing else
+cd app && flutter test         # 59 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
@@ -123,3 +125,9 @@ PostgreSQL. See [12 — XInfo gateway](docs/12-xinfo-gateway.md) and the DBA han
 the same `ApiClient` contract the HTTP client will. Connecting to the real API is an override
 of one provider. Location capture, share-intent receipts and permission dialogs are entered
 manually for now; the manual paths stay afterwards as fallbacks. See [app/README](app/README.md).
+
+**HttpApiClient** — the real `ApiClient` implementation, covering auth, customer reads,
+tours/plans, check-in/out and reports against the endpoints above; everything without a backend
+yet (opportunities, expenses, journey/tracking, most reference data) throws a catchable
+`ApiException` instead of pretending to work. `MockApiClient` stays the default provider until
+enough of that is backed — see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status).
