@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XInfo.Gateway.Contracts\XInfo.Gateway.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project asserts on the row shapes the procedures must return. Those are
+         internal so no caller depends on them, but the contract tests do need to see them. -->
+    <InternalsVisibleTo Include="XInfo.Gateway.Tests" />
+  </ItemGroup>
+
+</Project>

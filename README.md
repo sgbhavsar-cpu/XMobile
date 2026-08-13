@@ -32,7 +32,8 @@ CRM as the system of record for master data and back-office workflow.
 | Opportunities | Full CRUD in the app, linked to visits — the one **two-way** synced entity |
 | Sales history | Pulled from XInfo, read-only rolling window, visible offline |
 | Orders / catalogue | **Out of scope** — orders stay in XInfo |
-| Integration | REST API both directions, transactional outbox + idempotency keys |
+| Integration | REST both directions via a gateway **we build**, since XInfo has no API; transactional outbox + idempotency keys |
+| XInfo access | Stored procedures in XInfo's MS SQL, written by their DBA to an agreed contract |
 | Identity | **Keycloak deployed with the app** (LDAP federation available later) |
 | Offline | Full offline for the rep's working set, with an admin-tunable sync window |
 | Visit report | Fixed core fields + admin-defined dynamic extension section (versioned templates) |
@@ -57,6 +58,7 @@ CRM as the system of record for master data and back-office workflow.
 | [09 — Deployment](docs/09-deployment.md) | docker-compose, sizing, backup, upgrade |
 | [10 — Roadmap](docs/10-roadmap.md) | Phasing, risks, open questions |
 | [11 — Journey engine](docs/11-journey-engine.md) | The built inference core: structure, defects the tests caught, known limits |
+| [12 — XInfo gateway](docs/12-xinfo-gateway.md) | The API we build for XInfo, over stored procedures their DBA writes |
 
 ## Database
 
@@ -86,17 +88,24 @@ OpenAPI 3.1 outline: [`api/openapi.yaml`](api/openapi.yaml).
 ```
 app/                                     Flutter app (built, runs on mock backend)
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
-tests/XMobile.Tracking.Engine.Tests/     53 trace-replay tests
+src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
+db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
+tests/                                   73 .NET tests
 ```
 
 ```bash
-dotnet test                    # 53 engine tests — no database, network or device
+dotnet test                    # 73 tests — no database, network or device
 cd app && flutter test         # 52 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so
 the whole detection ruleset replays over recorded traces in CI.
 See [11 — Journey engine](docs/11-journey-engine.md).
+
+**XInfo gateway** — XInfo has no API, so we build one: REST for our backend, stored
+procedures into their SQL Server. Our own database is untouched by this and stays on
+PostgreSQL. See [12 — XInfo gateway](docs/12-xinfo-gateway.md) and the DBA handoff in
+[db/xinfo-mssql](db/xinfo-mssql/README.md).
 
 **Flutter app** — every screen and form, running against an in-memory backend that implements
 the same `ApiClient` contract the HTTP client will. Connecting to the real API is an override

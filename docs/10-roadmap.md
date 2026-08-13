@@ -94,6 +94,7 @@ derivation, analytics, battery tuning from field telemetry.
 | 22 | Order capture | Out of scope |
 | 23 | Visit proof | GPS + optional photos |
 | 24 | MDM | **Not in use** — nothing can be centrally enforced |
+| 25 | XInfo API | **Does not exist** — we build the gateway; their DBA writes the stored procedures |
 
 ## 5. Open questions still outstanding
 
@@ -107,13 +108,16 @@ integration is written behind `IXInfoClient` with a stub. They do block Phase 3.
 5. Auth mechanism and credential rotation?
 6. Expense status flow-back endpoint and status vocabulary?
 7. Rate limits and maintenance windows?
-8. **Opportunity API** — read/write endpoints, stage vocabulary, does it accept partial
-   (field-level) updates, and can it accept an externally-created id?
-9. **Prospect intake** — can XInfo hold a proposed customer in a pending state, and what does
-   it return on approval or rejection?
-10. **Sales history** — order/invoice read access, header-only or line items, and how far back?
-11. **Rate tables** — does XInfo publish mileage and per-diem rates for us to sync, or do we
-    maintain them in XMobile's admin? (Suggested amounts are only as good as these rates.)
+8. **Opportunity API** — stage vocabulary, and whether partial (field-level) updates are
+   acceptable given we send an ordering token.
+9. **Prospect intake** — how does a rejection come back to us? Our rep is already visiting them.
+10. **Sales history** — header-only or line items, and how far back?
+11. **Rate tables** — does XInfo hold mileage and per-diem rates, or do we maintain them?
+
+*These now take the form of the stored procedure contract in
+`db/xinfo-mssql/01_procedures.sql`, which is the concrete artefact to review with them.
+The blocking one is simpler than any of the above: **a dev SQL Server to point at**. Until
+then the procedure bodies do not exist and the gateway is unproven against a real instance.*
 
 **MDM: confirmed not in use.** Every permission and OEM setting must therefore be obtained
 from the rep in-app and re-verified continuously. See
@@ -137,6 +141,12 @@ every form, offline queueing, the dynamic report engine, share-intent expense ca
 tracking-health flow. 52 tests, no device needed. Location capture, receipt sharing and
 permission dialogs are entered by hand until the plugins land — and the manual paths stay
 afterwards, because a rep whose GPS will not fix still has to record where they were.
+
+**The XInfo gateway is built** (`src/XInfo.Gateway.*`). XInfo has no API, so we write one:
+REST for our backend, stored procedures into their MS SQL — bodies by their DBA, everything
+above them ours. Our own database is unaffected and stays on PostgreSQL. The procedure
+contract they implement against is `db/xinfo-mssql/01_procedures.sql`, and a build-failing
+test keeps it in step with the code. See [12 — XInfo gateway](12-xinfo-gateway.md).
 
 **Next**, in order:
 1. `HttpApiClient` — implement the existing `ApiClient` contract against the real endpoints.
