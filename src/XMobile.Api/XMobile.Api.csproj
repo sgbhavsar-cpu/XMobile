@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Modules\XMobile.Planning\XMobile.Planning.csproj" />
     <ProjectReference Include="..\Modules\XMobile.Visits\XMobile.Visits.csproj" />
     <ProjectReference Include="..\Modules\XMobile.Sync\XMobile.Sync.csproj" />
+    <ProjectReference Include="..\Modules\XMobile.Tracking\XMobile.Tracking.csproj" />
   </ItemGroup>
 
   <ItemGroup>

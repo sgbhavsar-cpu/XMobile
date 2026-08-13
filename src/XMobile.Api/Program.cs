@@ -13,6 +13,8 @@ using XMobile.Planning.Endpoints;
 using XMobile.Shared;
 using XMobile.Sync;
 using XMobile.Sync.Endpoints;
+using XMobile.Tracking;
+using XMobile.Tracking.Endpoints;
 using XMobile.Visits;
 using XMobile.Visits.Endpoints;
 
@@ -27,6 +29,7 @@ builder.Services.AddCustomersModule();
 builder.Services.AddPlanningModule();
 builder.Services.AddVisitsModule();
 builder.Services.AddSyncModule();
+builder.Services.AddTrackingModule();
 
 builder.Services.AddSingleton<IClock, SystemClock>();
 
@@ -75,6 +78,7 @@ app.MapCustomerEndpoints();
 app.MapTourEndpoints();
 app.MapVisitEndpoints();
 app.MapSyncEndpoints();
+app.MapTrackingEndpoints();
 
 app.MapHealthChecks("/health/live");
 app.MapHealthChecks("/health/ready");

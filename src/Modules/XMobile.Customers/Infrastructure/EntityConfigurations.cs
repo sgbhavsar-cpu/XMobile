@@ -65,3 +65,15 @@ public sealed class SalesHistoryConfig : IEntityTypeConfiguration<SalesHistory>
         builder.ConfigureSoftDelete();
     }
 }
+
+public sealed class GeofenceConfig : IEntityTypeConfiguration<Geofence>
+{
+    public void Configure(EntityTypeBuilder<Geofence> builder)
+    {
+        builder.ToTable("geofence", "customer");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+        builder.ConfigureSyncable();
+        builder.Property(e => e.Geog).HasColumnType("geography(Point,4326)");
+    }
+}

@@ -233,12 +233,72 @@ Known gaps from this pass:
   persist it in yet), and the bearer token lives in memory only — expected to be revisited once
   local persistence (Drift/SQLCipher) lands.
 
+**The ingest API + inference worker now exist** (`src/Modules/XMobile.Tracking`) — the
+"imperative shell" docs/08 §4 describes, wrapping `src/Modules/XMobile.Tracking.Engine` (until
+now never called by anything real). `InferenceRunner` loads a user's evidence
+(pings/geofence-events/stays/pauses/health-samples) plus `CONFIRMED`/overridden `journey_event`
+rows as anchors out of Postgres for a time window, builds the engine's `JourneyInput`
+(`Home`/`Sites` resolved via two new `XMobile.Shared` ports — `ITourContextLookup`, implemented
+by `XMobile.Planning`, and `IGeofenceLookup`, implemented by `XMobile.Customers` against a new
+`customer.geofence`-backed `Geofence` entity, trigger-maintained from `user_home_location`/
+`customer_site`), calls `new JourneyEngine().Infer(input)`, and persists the result: non-anchor
+`journey_event` rows are soft-superseded (`status = SUPERSEDED`) and rewritten, `journey_segment`
+rows are hard-deleted and rewritten wholesale (that table carries no status column and no anchor
+concept), `tracking_anomaly` rows are deduplicated by `(type, windowStart)` across reruns so a
+rerun over the same window doesn't spam duplicates, and `tracking.user_journey_state`/
+`tracking.inference_run` are upserted/inserted for audit. Redis is skipped at this fleet size
+(per the README's own design table) — `POST /v1/tracking/batch` and the endpoints that change
+anchors (override/confirm/heading-home) call the runner synchronously inline rather than via a
+queue. `NightlyReinferenceWorker` (a `BackgroundService` standing in for the eventual Quartz.NET
+job) reinferes the previous local day for every tracking-enabled user with evidence in the last 3
+days, its core logic (`RunNightlyBatchAsync`) directly callable so tests don't wait on a real
+timer tick. Endpoints: `POST /v1/tracking/batch` (dedupes ping/geofence-event/stay ids, ensures
+the month's `location_ping` partition, upserts `device_heartbeat`), `POST /v1/tracking/session`
+(+`/end`,`/pause`,`/resume`), `GET /v1/tracking/journey` (events/segments/anomalies plus a
+`DailySummary[]` computed on the fly rather than read from a stored rollup),
+`POST /v1/tracking/events/{id}/override`, `POST /v1/tracking/events/{id}/confirm`,
+`POST /v1/tracking/heading-home`, `GET /v1/tracking/geofences`. Verified by 4 new integration
+tests including the first real HTTP → Postgres → pure engine → Postgres round trip (a depart-home
+→ arrive-site → depart-site → arrive-home ping batch producing all four journey events and an
+`AT_CUSTOMER` segment) — 85/85 .NET tests passing (53 engine + 20 XInfo gateway + 12 API).
+
+A real, non-obvious bug the integration tests caught: every "start of local day" window this pass
+builds (`new DateTimeOffset(localDate.ToDateTime(TimeOnly.MinValue), istOffset)`) carries a
+non-zero (+05:30) offset, and Npgsql rejects writing or querying a `timestamptz` parameter with
+any offset but UTC (`"Cannot write DateTimeOffset with Offset=...: only offset 0 (UTC) is
+supported"`) — every such window, and every client-supplied timestamp on this module's DTOs, is
+now normalized with `.ToUniversalTime()` at construction/write time. This is a general trap for
+any local-wall-clock-to-`DateTimeOffset` construction against this Postgres driver, not specific
+to tracking — worth remembering if the same pattern shows up in a future module.
+
+Known gaps from this pass:
+- No clock-skew correction (`Ping.CorrectedAt` is always null) and no per-user timezone
+  resolution — every window/local-date computation uses a fixed IST (+05:30) offset rather than
+  the device's reported `deviceTz` or the user's `DefaultTimezone`.
+- `Sites` passed to the engine is only the active tour's planned sites (docs/02 §2.1: every
+  working day is modelled as a tour) — an unplanned visit to a site with no tour context is still
+  detected as `AT_CUSTOMER`, just without `siteId` resolved via geofence matching.
+- No auto-linking of detected `journey_event` rows to `visit` rows — check-in/check-out already
+  record visits independently via the Phase 1 REST endpoints, so this is a cross-reference
+  deferred alongside visit auto-close, not a functional gap.
+- `journey_segment.fromEventId`/`toEventId` are left unset — the engine's `JourneySegment` model
+  carries no event references, and matching them up after the fact is a nice-to-have, not
+  load-bearing for the timeline itself.
+- `tracking.daily_journey_summary` is not written; `GET /v1/tracking/journey`'s `daily[]` is
+  computed from the window's segments at read time, and its `visitsPlanned`/`visitsCompleted`/
+  `trackingCoveragePct`/`attendanceStatus` fields are left at 0/null (they need Planning/Visits
+  data this pass doesn't cross-call for just a summary field).
+- Client-supplied `DateTimeOffset` fields elsewhere in the app (Visits' `checkInAt`, Sync's
+  mutation timestamps, etc.) have the same latent non-UTC-offset risk this pass fixed locally in
+  Tracking — every existing test happens to submit `DateTimeOffset.UtcNow`, so it's never been
+  exercised, but a real client sending its local offset would hit the same Npgsql error.
+
 **Next**, in order:
-1. Ingest API + inference worker wrapping the journey engine (the imperative shell around the
-   pure core).
-2. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
-3. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state
+1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission flows.
+2. Local persistence (Drift/SQLite + SQLCipher) behind the repositories, replacing in-memory state
    — and giving `HttpApiClient` somewhere to persist its token/device id across restarts.
-4. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
+3. Backfill the ~27 `ApiClient` methods `HttpApiClient` currently stubs (opportunities, expenses,
    journey/tracking, remaining reference data) as their backend modules get built, then flip
    `apiClientProvider` to `HttpApiClient` as the default once coverage is complete enough.
+4. Audit the non-UTC-offset `DateTimeOffset` gap noted above across the rest of the API, not just
+   Tracking.

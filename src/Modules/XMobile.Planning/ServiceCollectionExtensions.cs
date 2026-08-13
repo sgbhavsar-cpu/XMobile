@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPlanningModule(this IServiceCollection services)
     {
         services.AddScoped<IVisitPlanCompletion, VisitPlanCompletionService>();
+        services.AddScoped<ITourContextLookup, TourContextLookupService>();
         services.AddScoped<ISyncEntityHandler, TourSyncHandler>();
         services.AddScoped<ISyncEntityHandler, TourDaySyncHandler>();
         services.AddScoped<ISyncEntityHandler, VisitPlanSyncHandler>();

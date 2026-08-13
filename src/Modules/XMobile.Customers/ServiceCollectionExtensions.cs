@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<ISiteLookup, SiteLookupService>();
         services.AddScoped<ICustomerScopeService, CustomerScopeService>();
+        services.AddScoped<IGeofenceLookup, GeofenceLookupService>();
         services.AddScoped<ISyncEntityHandler, CustomerAccountSyncHandler>();
         services.AddScoped<ISyncEntityHandler, CustomerSiteSyncHandler>();
         services.AddPersistenceModule<CustomersModuleMarker>();

@@ -125,3 +125,21 @@ public sealed class SalesHistory : ISyncableEntity, ISoftDeletable
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
 }
+
+/// <summary>One row per monitorable place (home or customer site) — trigger-maintained from
+/// `user_home_location`/`customer_site` (see the `tg_home_geofence`/`tg_site_geofence` triggers
+/// in db/schema/02_customer.sql). Read-only from the application's side.</summary>
+public sealed class Geofence : ISyncableEntity
+{
+    public Guid Id { get; set; }
+    public required string RefType { get; set; }
+    public Guid RefId { get; set; }
+    public required string Name { get; set; }
+    public required Point Geog { get; set; }
+    public int RadiusM { get; set; }
+    public int DwellSec { get; set; } = 240;
+    public bool IsActive { get; set; } = true;
+    public long RowVersion { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}

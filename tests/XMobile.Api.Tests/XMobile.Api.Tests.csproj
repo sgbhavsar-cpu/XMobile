@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\src\XMobile.Shared\XMobile.Shared.csproj" />
     <ProjectReference Include="..\..\src\XMobile.Persistence\XMobile.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Modules\XMobile.Identity\XMobile.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Modules\XMobile.Tracking\XMobile.Tracking.csproj" />
   </ItemGroup>
 
 </Project>

@@ -90,17 +90,18 @@ app/                                     Flutter app (built): every screen again
                                           MockApiClient by default; HttpApiClient exists
                                           and is tested, not yet the default provider
 src/Modules/XMobile.Tracking.Engine/     journey inference core (built)
+src/Modules/XMobile.Tracking/            ingest API + inference worker wrapping the engine (built)
 src/XMobile.Api, XMobile.Persistence,    the app's own backend (built): Phase 1 REST surface —
   Modules/XMobile.{Identity,Customers,     auth/device, customers (read), tours/plans,
   Planning,Visits,Sync}/                   check-in/out, visit reports, and offline sync
 src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
 db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
-tests/                                   81 .NET tests (8 of them integration tests against a
+tests/                                   85 .NET tests (12 of them integration tests against a
                                           real Testcontainers Postgres+PostGIS)
 ```
 
 ```bash
-dotnet test                    # 81 tests — needs Docker for XMobile.Api.Tests, nothing else
+dotnet test                    # 85 tests — needs Docker for XMobile.Api.Tests, nothing else
 cd app && flutter test         # 59 app tests — no device or emulator
 ```
 
@@ -131,3 +132,10 @@ tours/plans, check-in/out and reports against the endpoints above; everything wi
 yet (opportunities, expenses, journey/tracking, most reference data) throws a catchable
 `ApiException` instead of pretending to work. `MockApiClient` stays the default provider until
 enough of that is backed — see [10 — Roadmap §6](docs/10-roadmap.md#6-build-status).
+
+**Ingest API + inference worker** — the previously-inert `XMobile.Tracking.Engine` now has a
+caller. `InferenceRunner` (`src/Modules/XMobile.Tracking`) is the "imperative shell": it loads a
+rep's evidence out of Postgres, calls the pure engine, and persists the resulting journey, called
+synchronously from `POST /v1/tracking/batch` and the anchor-changing endpoints
+(override/confirm/heading-home) and periodically by `NightlyReinferenceWorker`. See
+[10 — Roadmap §6](docs/10-roadmap.md#6-build-status) for the full endpoint list and known gaps.

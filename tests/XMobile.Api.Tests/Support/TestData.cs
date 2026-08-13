@@ -15,7 +15,8 @@ namespace XMobile.Api.Tests.Support;
 /// </summary>
 internal static class TestData
 {
-    public static async Task<Guid> SeedHomeLocationAsync(ApiFactory factory, Guid userId)
+    public static async Task<Guid> SeedHomeLocationAsync(
+        ApiFactory factory, Guid userId, double lat = 18.52, double lon = 73.85, int radiusM = 200)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<XMobileDbContext>();
@@ -25,7 +26,8 @@ internal static class TestData
             UserId = userId,
             Label = "Home",
             City = "Pune",
-            Geog = new Point(73.85, 18.52) { SRID = 4326 },
+            Geog = new Point(lon, lat) { SRID = 4326 },
+            GeofenceRadiusM = radiusM,
             EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
         };
         db.Add(home);

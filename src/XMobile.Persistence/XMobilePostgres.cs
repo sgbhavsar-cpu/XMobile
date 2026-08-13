@@ -37,6 +37,13 @@ public static class XMobilePostgres
         builder.MapEnum<ChangeOp>("sync.change_op", NoOpNameTranslator);
         builder.MapEnum<MutationOp>("sync.mutation_op", NoOpNameTranslator);
         builder.MapEnum<MutationStatus>("sync.mutation_status", NoOpNameTranslator);
+        builder.MapEnum<JourneyState>("tracking.journey_state", NoOpNameTranslator);
+        builder.MapEnum<JourneyEventType>("tracking.journey_event_type", NoOpNameTranslator);
+        builder.MapEnum<SegmentType>("tracking.segment_type", NoOpNameTranslator);
+        builder.MapEnum<DetectionMethod>("tracking.detection_method", NoOpNameTranslator);
+        builder.MapEnum<EventStatus>("tracking.event_status", NoOpNameTranslator);
+        builder.MapEnum<PingSource>("tracking.ping_source", NoOpNameTranslator);
+        builder.MapEnum<SessionStatus>("tracking.session_status", NoOpNameTranslator);
 
         return builder.Build();
     }
@@ -59,5 +66,12 @@ public static class XMobilePostgres
         modelBuilder.HasPostgresEnum<ChangeOp>("sync", "change_op", NoOpNameTranslator);
         modelBuilder.HasPostgresEnum<MutationOp>("sync", "mutation_op", NoOpNameTranslator);
         modelBuilder.HasPostgresEnum<MutationStatus>("sync", "mutation_status", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<JourneyState>("tracking", "journey_state", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<JourneyEventType>("tracking", "journey_event_type", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<SegmentType>("tracking", "segment_type", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<DetectionMethod>("tracking", "detection_method", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<EventStatus>("tracking", "event_status", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<PingSource>("tracking", "ping_source", NoOpNameTranslator);
+        modelBuilder.HasPostgresEnum<SessionStatus>("tracking", "session_status", NoOpNameTranslator);
     }
 }
