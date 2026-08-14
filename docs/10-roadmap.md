@@ -395,9 +395,9 @@ persistence (`driftDatabaseProvider`) was already wired unconditionally regardle
 `ApiClient` is active, so nothing changed there. Verified via `flutter analyze` (the `CardTheme`
 error is gone; only the same 11 pre-existing, unrelated deprecation infos remain) and the full
 `flutter test` suite (74/74, unchanged — nothing in the test suite currently exercises
-`main.dart` directly). No `flutter run`/device build was attempted — no device or desktop build
-toolchain is available in this sandbox, so the opt-in flag is unverified end-to-end beyond static
-analysis; flagged rather than assumed.
+`main.dart` directly). No `flutter run`/device build was attempted at the time — no device or
+emulator was available in this sandbox yet, so the opt-in flag was unverified end-to-end beyond
+static analysis. **Since verified on a real emulator** — see below.
 
 **`ApiClient`'s journey/tracking area is now fully backed** — the last 4 stubbed methods
 (`trackingHealth`/`updateTrackingHealth`/`isTrackingActive`/`setTrackingActive`) have real
@@ -423,17 +423,39 @@ Verified: 93/93 .NET tests (6 new — health GET/PUT round-trip, 404 with no dev
 via status, pause-without-reason and resume-without-a-paused-session rejections) and 78/78
 Flutter tests (5 new) passing.
 
+**An Android emulator turned out to be available on this machine** (`C:\Android\Sdk`, AVDs
+`Pixel_10_Pro`/`xcm_test` — the former's system image was missing on disk and wouldn't boot,
+`xcm_test`, Android 14/API 34, did), so `flutter run` was attempted for the first time this
+project has had one. It failed immediately with a real, previously-undiscovered bug: the
+Android project's Gradle wrapper was still pinned to Gradle 8.3 with AGP 8.1.0/Kotlin 1.8.22 —
+whatever version was current when `flutter create` first scaffolded `app/android/` — against
+Flutter 3.44.9, which requires Gradle ≥8.7.0 and AGP ≥8.6.0. Fixed by bumping
+`android/gradle/wrapper/gradle-wrapper.properties` to Gradle 8.14 and `android/settings.gradle`'s
+plugin versions to AGP 8.7.0/Kotlin 2.0.20 (Flutter's stated minimums, not the newest available —
+newer versions remain a future bump, not currently required). With that fixed, the app built,
+installed, and ran correctly end to end: the real sign-in screen, the Today screen with seeded
+tour/visit data, and a multi-field New Expense form all rendered correctly on-device, with no
+crashes and nothing native-plugin-related in `logcat` — the first real confirmation that
+`sqlite3_flutter_libs`/`drift_flutter` (local persistence) actually initializes on a real device
+rather than only ever having been exercised through `flutter test`'s host-VM unit tests. The
+`XMOBILE_API_BASE_URL` opt-in flag itself (switching to `HttpApiClient`) was not exercised in
+this pass — that needs the .NET backend and a Postgres+PostGIS instance actually running
+somewhere the emulator can reach, which this pass didn't set up — only the default `MockApiClient`
+path was verified on-device.
+
 **Next**, in order:
 1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
-   flows — needs a real device, which this environment doesn't have.
+   flows — an emulator can exercise permission dialogs and mock GPS, but background-location
+   reliability testing across OEM battery killers genuinely needs a real physical device fleet;
+   partial progress is possible here now that an emulator exists, full confidence still isn't.
 2. Backfill the remaining `ApiClient` stubs (opportunities, expenses/attachments, most reference
    data) once their backend modules get built (Phase 3/3b) — journey/tracking is now the only
    fully-backed area. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage is
    complete enough.
 3. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
    docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.
-4. `addManualJourneyEvent` still only maps 1 of the app's 6 manual-entry event types
+4. Run the .NET backend + Postgres locally and verify `XMOBILE_API_BASE_URL` against it from the
+   emulator end to end, now that both a device and the backend pieces exist.
+5. `addManualJourneyEvent` still only maps 1 of the app's 6 manual-entry event types
    (`startReturn`) — the other 5 need a generic "create a manual event" backend endpoint if the
    full manual-correction UI is to work against the live backend.
-5. Verify the `XMOBILE_API_BASE_URL` opt-in flag against a real device or desktop build once one
-   is available — static analysis only, this pass.

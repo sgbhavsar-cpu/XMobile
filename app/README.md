@@ -14,6 +14,14 @@ flutter test         # 78 tests, no device or emulator needed
 flutter analyze
 ```
 
+`flutter run` has been verified end to end on a real Android emulator (API 34) — sign-in, the
+Today screen, and a multi-field form all render correctly, and local persistence
+(`sqlite3_flutter_libs`/`drift_flutter`) initializes cleanly with nothing in `logcat`. The Android
+Gradle build config (`android/gradle/wrapper/gradle-wrapper.properties`,
+`android/settings.gradle`) was bumped to Gradle 8.14/AGP 8.7.0/Kotlin 2.0.20 (Flutter's stated
+minimums) — it had been left at whatever `flutter create` scaffolded originally and had never
+actually been built until this was checked. See docs/10-roadmap.md §6.
+
 ## How it talks to the backend
 
 ```
