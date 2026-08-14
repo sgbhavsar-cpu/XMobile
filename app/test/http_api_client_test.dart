@@ -485,12 +485,95 @@ void main() {
       expect(callCount, 0);
     });
 
-    test('trackingHealth and friends stay unsupported — no backend counterpart exists', () async {
-      final client = MockClient((request) async => http.Response('should not be called', 500));
+    test('trackingHealth parses GET /v1/tracking/health', () async {
+      final client = MockClient((request) async => _json({
+            'locationPermission': 'ALWAYS',
+            'batteryOptimised': false,
+            'notificationsAllowed': true,
+            'activityPermission': true,
+            'autostartConfigured': true,
+            'isPowerSaving': false,
+            'lastUploadAt': '2026-08-13T09:00:00Z',
+            'queuedPings': 2,
+          }));
       final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
 
-      expect(api.trackingHealth, throwsA(isA<ApiException>()));
-      expect(api.isTrackingActive, throwsA(isA<ApiException>()));
+      final health = await api.trackingHealth();
+
+      expect(health.locationPermission, 'ALWAYS');
+      expect(health.autostartConfigured, isTrue);
+      expect(health.queuedPings, 2);
+    });
+
+    test('updateTrackingHealth PUTs the health fields and returns the updated value', () async {
+      http.Request? captured;
+      final client = MockClient((request) async {
+        captured = request;
+        return _json({
+          'locationPermission': 'ALWAYS',
+          'batteryOptimised': false,
+          'notificationsAllowed': true,
+          'activityPermission': true,
+          'autostartConfigured': true,
+          'isPowerSaving': false,
+          'lastUploadAt': '2026-08-13T09:00:00Z',
+          'queuedPings': 0,
+        });
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      final updated = await api.updateTrackingHealth(const TrackingHealth(
+        locationPermission: 'ALWAYS',
+        batteryOptimised: false,
+        notificationsAllowed: true,
+        activityPermission: true,
+        autostartConfigured: true,
+      ));
+
+      expect(captured!.method, 'PUT');
+      expect(captured!.url.path, '/v1/tracking/health');
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['locationPermission'], 'ALWAYS');
+      expect(body.containsKey('lastUploadAt'), isFalse); // server-stamped, never client-sent
+      expect(updated.locationPermission, 'ALWAYS');
+    });
+
+    test('isTrackingActive parses GET /v1/tracking/status', () async {
+      final client = MockClient((request) async => _json({'active': true}));
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      expect(await api.isTrackingActive(), isTrue);
+    });
+
+    test('setTrackingActive(false, ...) posts active and the pause reason', () async {
+      http.Request? captured;
+      final client = MockClient((request) async {
+        captured = request;
+        return http.Response('', 200);
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      await api.setTrackingActive(false, pauseReasonCode: 'PERSONAL_BREAK');
+
+      expect(captured!.url.path, '/v1/tracking/status');
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['active'], false);
+      expect(body['pauseReasonCode'], 'PERSONAL_BREAK');
+    });
+
+    test('setTrackingActive(true) omits pauseReasonCode when none is given', () async {
+      http.Request? captured;
+      final client = MockClient((request) async {
+        captured = request;
+        return http.Response('', 200);
+      });
+      final api = HttpApiClient(baseUrl: 'https://xmobile.test', httpClient: client, tokenStore: InMemoryTokenStore());
+
+      await api.setTrackingActive(true);
+
+      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+      expect(body['active'], true);
+      expect(body.containsKey('pauseReasonCode'), isFalse);
     });
   });
 }

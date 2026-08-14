@@ -1492,6 +1492,30 @@ class TrackingHealth {
   final DateTime? lastUploadAt;
   final int queuedPings;
 
+  static TrackingHealth fromJson(Map<String, dynamic> json) => TrackingHealth(
+        locationPermission: json['locationPermission'] as String,
+        batteryOptimised: json['batteryOptimised'] as bool,
+        notificationsAllowed: json['notificationsAllowed'] as bool,
+        activityPermission: json['activityPermission'] as bool,
+        autostartConfigured: json['autostartConfigured'] as bool,
+        isPowerSaving: json['isPowerSaving'] as bool? ?? false,
+        lastUploadAt: json['lastUploadAt'] == null ? null : DateTime.parse(json['lastUploadAt'] as String),
+        queuedPings: (json['queuedPings'] as num?)?.toInt() ?? 0,
+      );
+
+  /// `score`/`lastUploadAt` aren't sent — the server computes/stamps `lastUploadAt` itself on
+  /// write (src/Modules/XMobile.Tracking/Endpoints/TrackingEndpoints.cs), and `score` is a
+  /// client-only derived getter, not a field the update endpoint accepts.
+  Map<String, dynamic> toJson() => {
+        'locationPermission': locationPermission,
+        'batteryOptimised': batteryOptimised,
+        'notificationsAllowed': notificationsAllowed,
+        'activityPermission': activityPermission,
+        'autostartConfigured': autostartConfigured,
+        'isPowerSaving': isPowerSaving,
+        'queuedPings': queuedPings,
+      };
+
   /// Same score the manager sees, so a gap conversation starts from a shared checklist.
   int get score {
     var score = 100;

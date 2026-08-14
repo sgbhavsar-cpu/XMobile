@@ -399,16 +399,41 @@ error is gone; only the same 11 pre-existing, unrelated deprecation infos remain
 toolchain is available in this sandbox, so the opt-in flag is unverified end-to-end beyond static
 analysis; flagged rather than assumed.
 
+**`ApiClient`'s journey/tracking area is now fully backed** — the last 4 stubbed methods
+(`trackingHealth`/`updateTrackingHealth`/`isTrackingActive`/`setTrackingActive`) have real
+endpoints. `identity.device` already stored most of `TrackingHealth`'s fields
+(`LocationPermission`/`BatteryOptimised`/`NotificationsAllowed`/`ActivityPermission`, populated
+since Phase 1 via `POST /v1/auth/device`'s optional `Health` sub-object); it gained 4 more
+columns (`autostart_configured`, `is_power_saving`, `queued_pings`, `last_upload_at`) to complete
+the 1:1 mapping, matching every sibling health field's existing real-column pattern rather than
+splitting the concept into the `HealthDetails` JSON blob. New endpoints: `GET`/`PUT
+/v1/tracking/health` (full read/overwrite, `lastUploadAt` server-stamped not client-supplied) and
+`GET`/`POST /v1/tracking/status` (session pause/resume, matching `MockApiClient`'s existing rule
+that pausing without a `pauseReasonCode` is a hard validation error). Neither the Dart interface
+nor these new endpoints carry a device or session id — both resolve "the current one" implicitly
+(most-recently-seen non-revoked `Device` / the caller's `ACTIVE`/`PAUSED` `TrackingSession`),
+a disclosed simplification matching the app's one-device-per-rep assumption, not a general
+multi-device design. `POST /status` only pauses/resumes an *existing* session — activating with
+none paused throws a clear error pointing at `POST /v1/tracking/session` instead of guessing at
+starting one implicitly (that needs a `DeviceId`/`StartReason` this toggle doesn't have). The
+existing explicit-session-id `PauseSessionAsync`/`ResumeSessionAsync` handlers were refactored to
+share their core logic with the new implicit-session endpoints rather than duplicating it.
+`HttpApiClient` now calls all 4 real endpoints; `TrackingHealth` gained `fromJson`/`toJson`.
+Verified: 93/93 .NET tests (6 new — health GET/PUT round-trip, 404 with no device, pause/resume
+via status, pause-without-reason and resume-without-a-paused-session rejections) and 78/78
+Flutter tests (5 new) passing.
+
 **Next**, in order:
 1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
    flows — needs a real device, which this environment doesn't have.
 2. Backfill the remaining `ApiClient` stubs (opportunities, expenses/attachments, most reference
-   data) once their backend modules get built (Phase 3/3b) — journey/tracking is the only area
-   with a backend today. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage
-   is complete enough.
+   data) once their backend modules get built (Phase 3/3b) — journey/tracking is now the only
+   fully-backed area. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage is
+   complete enough.
 3. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
    docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.
-4. New backend endpoints for device tracking-health/session-status, if the manager-visible health
-   score and pause/resume UI are to work against the live backend rather than staying local-only.
+4. `addManualJourneyEvent` still only maps 1 of the app's 6 manual-entry event types
+   (`startReturn`) — the other 5 need a generic "create a manual event" backend endpoint if the
+   full manual-correction UI is to work against the live backend.
 5. Verify the `XMOBILE_API_BASE_URL` opt-in flag against a real device or desktop build once one
    is available — static analysis only, this pass.

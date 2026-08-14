@@ -1,9 +1,8 @@
-// The first real ApiClient implementation, talking to the ASP.NET Core backend built this
-// session (src/XMobile.Api). Not the default provider yet — see api/api_client.dart and
-// app/README.md's swap mechanism. Roughly half of ApiClient's 47 methods have no backend
-// counterpart yet (opportunities, expenses, journey/tracking, most reference data); those throw
-// a clear ApiException rather than pretending to work. See docs/10-roadmap.md §6 for the
-// up-to-date list of what's backed.
+// The first real ApiClient implementation, talking to the ASP.NET Core backend built over
+// several sessions (src/XMobile.Api). Not the default provider yet — see api/api_client.dart and
+// app/README.md's swap mechanism. Opportunities, expenses/attachments, and most reference data
+// still have no backend at all; those throw a clear ApiException rather than pretending to work.
+// See docs/10-roadmap.md §6 for the up-to-date list of what's backed.
 
 import 'dart:async';
 import 'dart:convert';
@@ -523,21 +522,36 @@ class HttpApiClient implements ApiClient {
     return JourneyEvent.fromJson(json);
   }
 
-  // trackingHealth/updateTrackingHealth/isTrackingActive/setTrackingActive have no backend
-  // counterpart at all (not merely unbuilt): TrackingHealth is a device self-report with no GET
-  // endpoint to read one back (device_heartbeat is write-only, nested inside POST /batch, and
-  // missing most of TrackingHealth's fields), and "is tracking active" is really a
-  // TrackingSession's status, which needs a sessionId ApiClient has nowhere to carry. Backfilling
-  // these needs new backend endpoints, not just wiring — see docs/10-roadmap.md §6.
+  // GET/PUT /v1/tracking/health and GET/POST /v1/tracking/status resolve "the current device" /
+  // "the current session" implicitly server-side — ApiClient carries no device or session id
+  // here, matching the interface this pass wires against (see docs/10-roadmap.md §6).
   @override
-  Future<TrackingHealth> trackingHealth() => _notSupported();
+  Future<TrackingHealth> trackingHealth() async {
+    final json = await _send('GET', '/v1/tracking/health') as Map<String, dynamic>;
+    return TrackingHealth.fromJson(json);
+  }
 
   @override
-  Future<TrackingHealth> updateTrackingHealth(TrackingHealth health) => _notSupported();
+  Future<TrackingHealth> updateTrackingHealth(TrackingHealth health) async {
+    final json =
+        await _send('PUT', '/v1/tracking/health', body: health.toJson()) as Map<String, dynamic>;
+    return TrackingHealth.fromJson(json);
+  }
 
   @override
-  Future<bool> isTrackingActive() => _notSupported();
+  Future<bool> isTrackingActive() async {
+    final json = await _send('GET', '/v1/tracking/status') as Map<String, dynamic>;
+    return json['active'] as bool;
+  }
 
+  /// No client-side pre-validation of `pauseReasonCode` (unlike `MockApiClient`) — matching how
+  /// every other real endpoint in this file works, the server's rejection comes back through the
+  /// normal problem+json → ApiException path (`_errorFor`) rather than being duplicated here.
   @override
-  Future<void> setTrackingActive(bool active, {String? pauseReasonCode}) => _notSupported();
+  Future<void> setTrackingActive(bool active, {String? pauseReasonCode}) async {
+    await _send('POST', '/v1/tracking/status', body: {
+      'active': active,
+      if (pauseReasonCode != null) 'pauseReasonCode': pauseReasonCode,
+    });
+  }
 }

@@ -81,3 +81,20 @@ public sealed record OverrideEventRequest(DateTimeOffset OccurredAt, string Reas
 public sealed record HeadingHomeRequest(DateTimeOffset? OccurredAt, Guid? TourId);
 
 public sealed record GeofenceDto(Guid Id, string RefType, Guid RefId, string Name, GeoPoint Point, int RadiusM);
+
+// ---------------------------------------------------------------- device health / tracking status
+
+/// <summary>Named DeviceHealthDto, not TrackingHealthDto, to avoid colliding with
+/// XMobile.Identity.Contracts.TrackingHealthDto (the differently-shaped device-registration
+/// sub-object) — this one is a 1:1 mirror of identity.device's health columns.</summary>
+public sealed record DeviceHealthDto(
+    string LocationPermission, bool BatteryOptimised, bool NotificationsAllowed, bool ActivityPermission,
+    bool AutostartConfigured, bool IsPowerSaving, DateTimeOffset? LastUploadAt, int QueuedPings);
+
+public sealed record UpdateDeviceHealthRequest(
+    string LocationPermission, bool BatteryOptimised, bool NotificationsAllowed, bool ActivityPermission,
+    bool AutostartConfigured, bool IsPowerSaving, int QueuedPings);
+
+public sealed record TrackingStatusDto(bool Active);
+
+public sealed record SetTrackingStatusRequest(bool Active, string? PauseReasonCode);

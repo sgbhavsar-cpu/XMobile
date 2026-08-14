@@ -58,6 +58,10 @@ public sealed class Device : ISyncableEntity, IHasGuidKey
     public bool? NotificationsAllowed { get; set; }
     public bool? ActivityPermission { get; set; }
     public bool? MockLocationAllowed { get; set; }
+    public bool? AutostartConfigured { get; set; }
+    public bool? IsPowerSaving { get; set; }
+    public int? QueuedPings { get; set; }
+    public DateTimeOffset? LastUploadAt { get; set; }
     public short? TrackingHealthScore { get; set; }
     public string HealthDetails { get; set; } = "{}";
     public int ClockSkewSec { get; set; }

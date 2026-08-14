@@ -223,6 +223,130 @@ public sealed class TrackingTests(ApiTestContext context)
         }
     }
 
+    [Fact]
+    public async Task Device_health_round_trips_through_GET_and_PUT()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-5");
+        await RegisterDeviceAsync(client);
+
+        using (var health = await ParseAsync(await client.GetAsync("/v1/tracking/health")))
+        {
+            // Registered without a Health sub-object, so everything reads back at its default.
+            Assert.Equal("UNKNOWN", health.RootElement.GetProperty("locationPermission").GetString());
+            Assert.False(health.RootElement.GetProperty("autostartConfigured").GetBoolean());
+        }
+
+        var putResponse = await client.PutAsJsonAsync("/v1/tracking/health", new
+        {
+            locationPermission = "ALWAYS",
+            batteryOptimised = false,
+            notificationsAllowed = true,
+            activityPermission = true,
+            autostartConfigured = true,
+            isPowerSaving = false,
+            queuedPings = 3,
+        });
+        Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
+        using (var updated = await ParseAsync(putResponse))
+        {
+            Assert.Equal("ALWAYS", updated.RootElement.GetProperty("locationPermission").GetString());
+            Assert.True(updated.RootElement.GetProperty("autostartConfigured").GetBoolean());
+            Assert.Equal(3, updated.RootElement.GetProperty("queuedPings").GetInt32());
+            Assert.NotEqual(JsonValueKind.Null, updated.RootElement.GetProperty("lastUploadAt").ValueKind);
+        }
+
+        using var reread = await ParseAsync(await client.GetAsync("/v1/tracking/health"));
+        Assert.Equal("ALWAYS", reread.RootElement.GetProperty("locationPermission").GetString());
+    }
+
+    [Fact]
+    public async Task Getting_health_without_a_registered_device_is_404()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-6");
+
+        var response = await client.GetAsync("/v1/tracking/health");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Tracking_status_reflects_session_pause_and_resume()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-7");
+        var deviceId = await RegisterDeviceAsync(client);
+
+        using (var before = await ParseAsync(await client.GetAsync("/v1/tracking/status")))
+        {
+            Assert.False(before.RootElement.GetProperty("active").GetBoolean());
+        }
+
+        var startResponse = await client.PostAsJsonAsync("/v1/tracking/session", new
+        {
+            sessionId = Guid.NewGuid(), deviceId, startedAt = DateTimeOffset.UtcNow, startReason = "MANUAL",
+        });
+        Assert.Equal(HttpStatusCode.Created, startResponse.StatusCode);
+
+        using (var afterStart = await ParseAsync(await client.GetAsync("/v1/tracking/status")))
+        {
+            Assert.True(afterStart.RootElement.GetProperty("active").GetBoolean());
+        }
+
+        var pauseResponse = await client.PostAsJsonAsync(
+            "/v1/tracking/status", new { active = false, pauseReasonCode = "PERSONAL_BREAK" });
+        Assert.Equal(HttpStatusCode.OK, pauseResponse.StatusCode);
+        using (var paused = await ParseAsync(pauseResponse))
+        {
+            Assert.False(paused.RootElement.GetProperty("active").GetBoolean());
+        }
+
+        var resumeResponse = await client.PostAsJsonAsync("/v1/tracking/status", new { active = true });
+        Assert.Equal(HttpStatusCode.OK, resumeResponse.StatusCode);
+        using var resumed = await ParseAsync(resumeResponse);
+        Assert.True(resumed.RootElement.GetProperty("active").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Pausing_without_a_reason_is_rejected()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-8");
+        var deviceId = await RegisterDeviceAsync(client);
+        await client.PostAsJsonAsync("/v1/tracking/session", new
+        {
+            sessionId = Guid.NewGuid(), deviceId, startedAt = DateTimeOffset.UtcNow, startReason = "MANUAL",
+        });
+
+        var response = await client.PostAsJsonAsync("/v1/tracking/status", new { active = false });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Pausing_with_nothing_active_is_a_conflict()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-9");
+
+        var response = await client.PostAsJsonAsync(
+            "/v1/tracking/status", new { active = false, pauseReasonCode = "PERSONAL_BREAK" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Resuming_with_nothing_paused_is_rejected()
+    {
+        var factory = context.Factory;
+        var (client, _) = await AuthHelper.LoginAsync(factory, "E-TRACK-10");
+
+        var response = await client.PostAsJsonAsync("/v1/tracking/status", new { active = true });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static void AppendStay(List<object> pings, (double Lat, double Lon) point, DateTimeOffset from, TimeSpan duration)

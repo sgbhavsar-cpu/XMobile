@@ -96,13 +96,13 @@ src/XMobile.Api, XMobile.Persistence,    the app's own backend (built): Phase 1 
   Planning,Visits,Sync}/                   check-in/out, visit reports, and offline sync
 src/XInfo.Gateway.Api|Data|Contracts/    the API we build for XInfo (built)
 db/xinfo-mssql/                          stored procedure contract for the XInfo DBA
-tests/                                   87 .NET tests (14 of them integration tests against a
+tests/                                   93 .NET tests (20 of them integration tests against a
                                           real Testcontainers Postgres+PostGIS)
 ```
 
 ```bash
-dotnet test                    # 87 tests — needs Docker for XMobile.Api.Tests, nothing else
-cd app && flutter test         # 74 app tests — no device or emulator
+dotnet test                    # 93 tests — needs Docker for XMobile.Api.Tests, nothing else
+cd app && flutter test         # 78 app tests — no device or emulator
 ```
 
 **Journey engine** — a pure `Infer(JourneyInput) → JourneyResult` with no dependencies, so

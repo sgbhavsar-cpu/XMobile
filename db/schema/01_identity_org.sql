@@ -109,6 +109,10 @@ CREATE TABLE identity.device (
     notifications_allowed boolean,
     activity_permission   boolean,
     mock_location_allowed boolean,
+    autostart_configured  boolean,                        -- OEM autostart guide completed
+    is_power_saving       boolean,
+    queued_pings          integer,
+    last_upload_at        timestamptz,                    -- last time this health snapshot was reported
     tracking_health_score smallint CHECK (tracking_health_score BETWEEN 0 AND 100),
     health_details        jsonb NOT NULL DEFAULT '{}'::jsonb,
     clock_skew_sec        integer NOT NULL DEFAULT 0,

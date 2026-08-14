@@ -40,6 +40,11 @@ public static class TrackingEndpoints
 
         tracking.MapGet("/geofences", GetGeofencesAsync);
 
+        tracking.MapGet("/health", GetHealthAsync);
+        tracking.MapPut("/health", UpdateHealthAsync);
+        tracking.MapGet("/status", GetStatusAsync);
+        tracking.MapPost("/status", SetStatusAsync);
+
         return app;
     }
 
@@ -247,16 +252,8 @@ public static class TrackingEndpoints
         Guid id, SessionPauseRequest request, XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
     {
         var session = await LoadOwnSessionAsync(db, currentUser, id, ct);
-        session.Status = SessionStatus.PAUSED;
-        db.Add(new TrackingPause
-        {
-            Id = request.PauseId,
-            SessionId = session.Id,
-            UserId = currentUser.UserId,
-            PausedAt = request.PausedAt.ToUniversalTime(),
-            ReasonCode = request.ReasonCode,
-            ReasonText = request.ReasonText,
-        });
+        PauseCore(db, session, request.PauseId, currentUser.UserId, request.PausedAt.ToUniversalTime(),
+            request.ReasonCode, request.ReasonText);
         await SaveOrConflictAsync(db, ct);
         return Results.Ok(ToSessionDto(session));
     }
@@ -265,19 +262,43 @@ public static class TrackingEndpoints
         Guid id, SessionResumeRequest request, XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
     {
         var session = await LoadOwnSessionAsync(db, currentUser, id, ct);
+        await ResumeCoreAsync(db, session, request.ResumedAt.ToUniversalTime(), ct);
+        await SaveOrConflictAsync(db, ct);
+        return Results.Ok(ToSessionDto(session));
+    }
+
+    /// <summary>Shared by the explicit-session-id endpoints above and the implicit-session
+    /// GET/POST /status endpoints below — same mechanics either way.</summary>
+    private static void PauseCore(
+        XMobileDbContext db, TrackingSession session, Guid pauseId, Guid userId, DateTimeOffset pausedAt,
+        string reasonCode, string? reasonText)
+    {
+        session.Status = SessionStatus.PAUSED;
+        db.Add(new TrackingPause
+        {
+            Id = pauseId,
+            SessionId = session.Id,
+            UserId = userId,
+            PausedAt = pausedAt,
+            ReasonCode = reasonCode,
+            ReasonText = reasonText,
+        });
+    }
+
+    private static async Task ResumeCoreAsync(
+        XMobileDbContext db, TrackingSession session, DateTimeOffset resumedAt, CancellationToken ct)
+    {
         var pause = await db.Set<TrackingPause>()
-            .Where(p => p.SessionId == id && p.ResumedAt == null)
+            .Where(p => p.SessionId == session.Id && p.ResumedAt == null)
             .OrderByDescending(p => p.PausedAt)
             .FirstOrDefaultAsync(ct);
         if (pause is not null)
         {
-            pause.ResumedAt = request.ResumedAt.ToUniversalTime();
+            pause.ResumedAt = resumedAt;
             pause.ResumedBy = "USER";
         }
 
         session.Status = SessionStatus.ACTIVE;
-        await SaveOrConflictAsync(db, ct);
-        return Results.Ok(ToSessionDto(session));
     }
 
     // ---------------------------------------------------------------- journey
@@ -404,6 +425,93 @@ public static class TrackingEndpoints
         return Results.Ok(limited.Select(g => new GeofenceDto(g.Id, g.RefType, g.RefId, g.Name, g.Point, g.RadiusM)));
     }
 
+    // ---------------------------------------------------------------- device health
+
+    private static async Task<IResult> GetHealthAsync(
+        XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
+    {
+        var device = await LoadCurrentDeviceAsync(db, currentUser, ct);
+        return Results.Ok(ToHealthDto(device));
+    }
+
+    private static async Task<IResult> UpdateHealthAsync(
+        UpdateDeviceHealthRequest request, XMobileDbContext db, ICurrentUser currentUser, IClock clock,
+        CancellationToken ct)
+    {
+        var device = await LoadCurrentDeviceAsync(db, currentUser, ct);
+        device.LocationPermission = request.LocationPermission;
+        device.BatteryOptimised = request.BatteryOptimised;
+        device.NotificationsAllowed = request.NotificationsAllowed;
+        device.ActivityPermission = request.ActivityPermission;
+        device.AutostartConfigured = request.AutostartConfigured;
+        device.IsPowerSaving = request.IsPowerSaving;
+        device.QueuedPings = request.QueuedPings;
+        // Server-stamped, not client-supplied — "when was this last uploaded" is meaningless if
+        // the device can back-date it.
+        device.LastUploadAt = clock.UtcNow;
+        await SaveOrConflictAsync(db, ct);
+        return Results.Ok(ToHealthDto(device));
+    }
+
+    /// <summary>Neither this nor the tracking-status endpoints below carry a device/session id —
+    /// ApiClient's trackingHealth()/isTrackingActive()/setTrackingActive() take none, so "current"
+    /// is resolved implicitly. Reasonable given the app's one-device-per-rep assumption (BYOD,
+    /// under 100 reps — docs/10-roadmap.md); not a general multi-device design.</summary>
+    private static async Task<Device> LoadCurrentDeviceAsync(
+        XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
+        => await db.Set<Device>()
+            .Where(d => d.UserId == currentUser.UserId && d.RevokedAt == null)
+            .OrderByDescending(d => d.LastSeenAt)
+            .FirstOrDefaultAsync(ct)
+           ?? throw new NotFoundException("No device registered for this user");
+
+    // ---------------------------------------------------------------- tracking status
+
+    private static async Task<IResult> GetStatusAsync(
+        XMobileDbContext db, ICurrentUser currentUser, CancellationToken ct)
+    {
+        var active = await db.Set<TrackingSession>()
+            .AnyAsync(s => s.UserId == currentUser.UserId && s.Status == SessionStatus.ACTIVE, ct);
+        return Results.Ok(new TrackingStatusDto(active));
+    }
+
+    /// <summary>Only pauses/resumes an existing session — never starts one. Starting needs a
+    /// DeviceId/StartReason POST /v1/tracking/session already takes explicitly; inventing an
+    /// implicit session-start through this boolean toggle would guess at both.</summary>
+    private static async Task<IResult> SetStatusAsync(
+        SetTrackingStatusRequest request, XMobileDbContext db, ICurrentUser currentUser, IClock clock,
+        CancellationToken ct)
+    {
+        if (!request.Active)
+        {
+            if (string.IsNullOrWhiteSpace(request.PauseReasonCode))
+            {
+                throw new DomainValidationException("pauseReasonCode is required to pause tracking",
+                    new Dictionary<string, string[]> { ["pauseReasonCode"] = ["required"] });
+            }
+
+            var activeSession = await db.Set<TrackingSession>()
+                .FirstOrDefaultAsync(s => s.UserId == currentUser.UserId && s.Status == SessionStatus.ACTIVE, ct)
+                ?? throw new StateConflictException("No active tracking session to pause");
+
+            PauseCore(db, activeSession, Guid.NewGuid(), currentUser.UserId, clock.UtcNow,
+                request.PauseReasonCode!, null);
+            await SaveOrConflictAsync(db, ct);
+            return Results.Ok(new TrackingStatusDto(false));
+        }
+
+        var pausedSession = await db.Set<TrackingSession>()
+            .Where(s => s.UserId == currentUser.UserId && s.Status == SessionStatus.PAUSED)
+            .OrderByDescending(s => s.StartedAt)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new DomainValidationException(
+                "No paused tracking session to resume — start one via POST /v1/tracking/session");
+
+        await ResumeCoreAsync(db, pausedSession, clock.UtcNow, ct);
+        await SaveOrConflictAsync(db, ct);
+        return Results.Ok(new TrackingStatusDto(true));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static DateTimeOffset StartOfLocalDay(DateTimeOffset instant)
@@ -477,4 +585,9 @@ public static class TrackingEndpoints
 
     private static TrackingSessionDto ToSessionDto(TrackingSession s) => new(
         s.Id, s.Status.ToString(), s.StartedAt, s.EndedAt, s.EndReason, s.RowVersion);
+
+    private static DeviceHealthDto ToHealthDto(Device d) => new(
+        d.LocationPermission ?? "UNKNOWN", d.BatteryOptimised ?? false, d.NotificationsAllowed ?? false,
+        d.ActivityPermission ?? false, d.AutostartConfigured ?? false, d.IsPowerSaving ?? false,
+        d.LastUploadAt, d.QueuedPings ?? 0);
 }
