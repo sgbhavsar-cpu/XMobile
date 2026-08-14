@@ -24,13 +24,18 @@ screens ─► repositories/providers ─► ApiClient (interface) ─► MockAp
 `ApiClient` (`lib/core/api/api_client.dart`) mirrors `api/openapi.yaml` closely — `HttpApiClient`
 also calls a couple of endpoints not yet in that spec (`PUT /v1/auth/home`,
 `GET /v1/plans/{id}`; see `docs/10-roadmap.md §6`) where the interface needed one to exist at
-all. Connecting to the real service is an override of **one provider**:
+all. Connecting to the real service is an override of **one provider**, and `main.dart` already
+wires it up behind a build-time flag so no code change is needed to try it:
+
+```bash
+flutter run --dart-define=XMOBILE_API_BASE_URL=https://xmobile.internal/api
+```
+
+Leave the flag unset and the app runs against `MockApiClient`, same as `flutter run` alone. The
+override itself (`lib/main.dart`) is nothing more than:
 
 ```dart
-ProviderScope(
-  overrides: [apiClientProvider.overrideWithValue(HttpApiClient(baseUrl: 'https://xmobile.internal/api'))],
-  child: const XMobileApp(),
-)
+apiClientProvider.overrideWithValue(HttpApiClient(baseUrl: _apiBaseUrl))
 ```
 
 No screen, form or repository changes — though a good number of `ApiClient`'s methods

@@ -2,9 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/router.dart';
+import 'core/api/http_api_client.dart';
+import 'core/state/providers.dart';
+
+/// Opt-in real backend: `flutter run --dart-define=XMOBILE_API_BASE_URL=https://xmobile.internal/api`.
+/// Left unset, the app runs against `MockApiClient` (today's default — see `apiClientProvider`);
+/// `HttpApiClient` doesn't yet cover enough of `ApiClient` (opportunities, expenses, most
+/// reference data, device tracking-health) to make it the unconditional default without breaking
+/// those screens, so this is a deliberate opt-in rather than a flip.
+const _apiBaseUrl = String.fromEnvironment('XMOBILE_API_BASE_URL');
 
 void main() {
-  runApp(const ProviderScope(child: XMobileApp()));
+  final overrides = <Override>[
+    if (_apiBaseUrl.isNotEmpty) apiClientProvider.overrideWithValue(HttpApiClient(baseUrl: _apiBaseUrl)),
+  ];
+  runApp(ProviderScope(overrides: overrides, child: const XMobileApp()));
 }
 
 class XMobileApp extends ConsumerWidget {
@@ -37,7 +49,7 @@ class XMobileApp extends ConsumerWidget {
         border: OutlineInputBorder(),
         isDense: false,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),

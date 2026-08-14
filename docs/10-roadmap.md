@@ -381,6 +381,24 @@ and `POST /v1/sync/push` and assert success rather than the `500` this threw bef
 the entire existing suite was re-run since this is a model-wide change — 87/87 .NET tests
 passing, zero regressions.
 
+**`app/lib/main.dart` now compiles and can talk to a real backend.** The pre-existing
+`CardTheme`/`CardThemeData` compile error (a Flutter SDK Material-theme API drift, unrelated to
+any recent work) is fixed — one word, `CardTheme(` → `CardThemeData(`. Separately, `main()` now
+reads a compile-time `XMOBILE_API_BASE_URL` (`String.fromEnvironment`) and overrides
+`apiClientProvider` with `HttpApiClient(baseUrl: ...)` only when it's set:
+`flutter run --dart-define=XMOBILE_API_BASE_URL=https://xmobile.internal/api` connects to the
+real backend; plain `flutter run` behaves exactly as before (`MockApiClient`). Deliberately an
+opt-in flag, not a flipped default — `HttpApiClient` still doesn't cover opportunities, expenses,
+most reference data, or device tracking-health, so making it unconditional would break real usage
+of those screens today, contradicting the documented default policy (`app/README.md`). Local
+persistence (`driftDatabaseProvider`) was already wired unconditionally regardless of which
+`ApiClient` is active, so nothing changed there. Verified via `flutter analyze` (the `CardTheme`
+error is gone; only the same 11 pre-existing, unrelated deprecation infos remain) and the full
+`flutter test` suite (74/74, unchanged — nothing in the test suite currently exercises
+`main.dart` directly). No `flutter run`/device build was attempted — no device or desktop build
+toolchain is available in this sandbox, so the opt-in flag is unverified end-to-end beyond static
+analysis; flagged rather than assumed.
+
 **Next**, in order:
 1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
    flows — needs a real device, which this environment doesn't have.
@@ -388,9 +406,9 @@ passing, zero regressions.
    data) once their backend modules get built (Phase 3/3b) — journey/tracking is the only area
    with a backend today. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage
    is complete enough.
-3. Fix the pre-existing `main.dart` `CardTheme`/`CardThemeData` compile error and wire
-   `HttpApiClient`/local persistence into an actual app bootstrap.
-4. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
+3. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
    docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.
-5. New backend endpoints for device tracking-health/session-status, if the manager-visible health
+4. New backend endpoints for device tracking-health/session-status, if the manager-visible health
    score and pause/resume UI are to work against the live backend rather than staying local-only.
+5. Verify the `XMOBILE_API_BASE_URL` opt-in flag against a real device or desktop build once one
+   is available — static analysis only, this pass.
