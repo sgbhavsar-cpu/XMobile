@@ -149,6 +149,43 @@ public sealed class SyncTests(ApiTestContext context)
         Assert.Equal("Changed offline", tour.RootElement.GetProperty("title").GetString());
     }
 
+    /// <summary>Regression test for the Npgsql "Cannot write DateTimeOffset with Offset=X..."
+    /// bug (docs/10-roadmap.md §6) — `sync.client_mutation.occurred_at` is written from every
+    /// pushed mutation's `occurredAt`, and every other test in this file omits it or uses
+    /// DateTimeOffset.UtcNow (offset always zero), which never exercised this. A real device
+    /// reports its own local offset.</summary>
+    [Fact]
+    public async Task Push_accepts_a_mutation_with_a_non_utc_offset_occurredAt()
+    {
+        var factory = context.Factory;
+        var (client, userId) = await AuthHelper.LoginAsync(factory, "E-SYNC-4");
+        await TestData.SeedHomeLocationAsync(factory, userId);
+        var deviceId = await RegisterDeviceAsync(client);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var tourId = Guid.NewGuid();
+        var pushResponse = await client.PostAsJsonAsync("/v1/sync/push", new
+        {
+            deviceId,
+            mutations = new[]
+            {
+                new
+                {
+                    clientMutationId = Guid.NewGuid(),
+                    entity = "planning.tour",
+                    id = tourId,
+                    op = "INSERT",
+                    occurredAt = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)),
+                    data = new { title = "Pushed offline", plannedStartDate = today, plannedEndDate = today },
+                },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, pushResponse.StatusCode);
+        using var push = await ParseAsync(pushResponse);
+        Assert.Equal("APPLIED", push.RootElement.GetProperty("results")[0].GetProperty("status").GetString());
+    }
+
     /// <summary>`sync.client_mutation.device_id` has a real FK to `identity.device` — push
     /// needs a registered device, exactly as a real client would already have from onboarding.</summary>
     private static async Task<Guid> RegisterDeviceAsync(HttpClient client)

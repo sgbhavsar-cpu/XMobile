@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.Extensions.Options;
 using XMobile.Shared;
 
@@ -16,6 +17,12 @@ public sealed class XMobileDbContext(
     IOptions<PersistenceModelOptions> modelOptions,
     ICurrentUser currentUser) : DbContext(options)
 {
+    private static readonly ValueConverter<DateTimeOffset, DateTimeOffset> UtcDateTimeOffsetConverter =
+        new(v => v.ToUniversalTime(), v => v);
+
+    private static readonly ValueConverter<DateTimeOffset?, DateTimeOffset?> UtcNullableDateTimeOffsetConverter =
+        new(v => v.HasValue ? v.Value.ToUniversalTime() : v, v => v);
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -25,6 +32,31 @@ public sealed class XMobileDbContext(
         foreach (var assembly in modelOptions.Value.ModuleAssemblies)
         {
             modelBuilder.ApplyConfigurationsFromAssembly(assembly);
+        }
+
+        // Npgsql refuses to write or query a timestamptz column with a DateTimeOffset whose
+        // Offset isn't exactly zero ("Cannot write DateTimeOffset with Offset=X... only offset 0
+        // (UTC) is supported") — discovered when a client-constructed local-day window tripped
+        // it in XMobile.Tracking. Any client-supplied DateTimeOffset (a mobile device reporting
+        // its own local offset, e.g. check-in/check-out times, sync mutation timestamps) hits the
+        // same failure. A model-wide value converter — not per-endpoint .ToUniversalTime() calls —
+        // covers both failure modes: EF Core applies a property's converter to the other side of
+        // a LINQ comparison during query translation too, so this fixes `.Where(x => x.At >= y)`
+        // filters as well as entity writes. Idempotent (ToUniversalTime() on an already-UTC value
+        // is a no-op), so safe to apply to every DateTimeOffset property uniformly.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTimeOffset))
+                {
+                    property.SetValueConverter(UtcDateTimeOffsetConverter);
+                }
+                else if (property.ClrType == typeof(DateTimeOffset?))
+                {
+                    property.SetValueConverter(UtcNullableDateTimeOffsetConverter);
+                }
+            }
         }
     }
 

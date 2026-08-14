@@ -202,6 +202,29 @@ public sealed class CoreFlowTests(ApiTestContext context)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    /// <summary>Regression test for the Npgsql "Cannot write DateTimeOffset with Offset=X..."
+    /// bug (docs/10-roadmap.md §6) — every other test in this file submits DateTimeOffset.UtcNow
+    /// (offset always zero), which never exercised this. A real device reports its own local
+    /// offset.</summary>
+    [Fact]
+    public async Task Check_in_accepts_a_non_utc_offset_timestamp()
+    {
+        var factory = context.Factory;
+        var (client, userId) = await AuthHelper.LoginAsync(factory, "E-CORE-5");
+        var (_, siteId) = await TestData.SeedCustomerWithSiteAsync(factory, userId, lat: 18.52, lon: 73.85);
+
+        var response = await client.PostAsJsonAsync("/v1/visits/check-in", new
+        {
+            visitId = Guid.NewGuid(),
+            siteId,
+            checkInAt = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)),
+            point = new { lat = 18.52, lon = 73.85 },
+            method = "MANUAL",
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
     private static async Task<JsonDocument> ParseAsync(HttpResponseMessage response)
         => JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 }

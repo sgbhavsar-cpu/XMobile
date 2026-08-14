@@ -359,6 +359,28 @@ this needs new backend endpoints, not just Dart-side wiring. `JourneyEvent`/`Jou
 already existed backend-side, now visible client-side too. Verified by 8 new tests in
 `http_api_client_test.dart` — 74/74 Flutter tests passing.
 
+**The non-UTC-offset `DateTimeOffset` gap flagged in the Tracking section above is now fixed
+globally**, not just in `XMobile.Tracking`. A background research pass across the whole backend
+found 6 more real (unfixed) call sites — `Visit.CheckInAt`/`CheckOutAt` (from
+`CheckInRequestDto`/`CheckOutRequestDto`), and `Visit.CheckInAt`/`CheckOutAt`,
+`VisitReport.SubmittedAt`, `VisitPlan.DeletedAt`, and `ClientMutation.OccurredAt` (all fanning out
+from `PushMutationRequest.OccurredAt` via the sync push path) — and, more usefully, confirmed no
+EF Core value-converter/interceptor mechanism existed anywhere yet. Rather than patching each
+site individually (the Tracking module's approach), `XMobileDbContext.OnModelCreating`
+(`src/XMobile.Persistence/XMobileDbContext.cs`) now applies a `ValueConverter<DateTimeOffset,
+DateTimeOffset>` to **every** `DateTimeOffset`/`DateTimeOffset?` property on every entity,
+calling `.ToUniversalTime()` on the way to the provider. This is strictly better than an
+interceptor: EF Core runs a property's converter on both sides of a comparison during query
+translation, so it fixes LINQ `.Where(x => x.At >= someLocalOffsetValue)` filters too, not just
+entity writes — a `SaveChanges`-only interceptor would have missed the query-parameter case
+entirely. Idempotent (`ToUniversalTime()` on an already-UTC value is a no-op), so safe to apply
+uniformly; `XMobile.Tracking`'s existing manual `.ToUniversalTime()` calls are now redundant but
+harmless and were left as-is rather than touched in this pass. Verified two ways: two new
+regression tests submit a real non-UTC (IST, +05:30) offset through `POST /v1/visits/check-in`
+and `POST /v1/sync/push` and assert success rather than the `500` this threw before the fix, and
+the entire existing suite was re-run since this is a model-wide change — 87/87 .NET tests
+passing, zero regressions.
+
 **Next**, in order:
 1. Device plugins: background location, geofences, share-intent, on-device OCR, real permission
    flows — needs a real device, which this environment doesn't have.
@@ -366,11 +388,9 @@ already existed backend-side, now visible client-side too. Verified by 8 new tes
    data) once their backend modules get built (Phase 3/3b) — journey/tracking is the only area
    with a backend today. Flip `apiClientProvider` to `HttpApiClient` as the default once coverage
    is complete enough.
-3. Audit the non-UTC-offset `DateTimeOffset` gap noted in the Tracking section above across the
-   rest of the API.
-4. Fix the pre-existing `main.dart` `CardTheme`/`CardThemeData` compile error and wire
+3. Fix the pre-existing `main.dart` `CardTheme`/`CardThemeData` compile error and wire
    `HttpApiClient`/local persistence into an actual app bootstrap.
-5. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
+4. The full per-entity Drift schema + sync engine (push/pull workers, conflict handling per
    docs/04 §4) once enough of `ApiClient` is backed to make a local cache worth reading from.
-6. New backend endpoints for device tracking-health/session-status, if the manager-visible health
+5. New backend endpoints for device tracking-health/session-status, if the manager-visible health
    score and pause/resume UI are to work against the live backend rather than staying local-only.
