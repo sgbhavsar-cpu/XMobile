@@ -66,7 +66,35 @@ CREATE OR ALTER PROCEDURE xm.Customers_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Customers_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.Customer below with your real table(s)/view and adjust the
+    -- column expressions on the left of each "=" to pull from it. Keep the keyset WHERE/ORDER BY
+    -- shape as-is — the gateway relies on it for stable paging (every other _GetChanged
+    -- procedure in this file follows the identical shape).
+    SELECT TOP (@PageSize)
+        XinfoId            = CAST(c.Id AS nvarchar(64)),
+        Name               = c.Name,
+        Code               = c.Code,
+        LegalName          = c.LegalName,
+        AccountType        = c.AccountType,
+        Category           = c.Category,
+        Industry           = c.Industry,
+        ParentXinfoId      = CAST(c.ParentId AS nvarchar(64)),
+        OwnerEmployeeCode  = c.OwnerEmployeeCode,
+        OrgUnitCode        = c.OrgUnitCode,
+        CreditStatus       = c.CreditStatus,
+        GstNumber          = c.GstNumber,
+        Phone              = c.Phone,
+        Email              = c.Email,
+        IsActive           = c.IsActive,
+        ModifiedAt         = c.ModifiedAt
+    FROM dbo.Customer AS c
+    WHERE (@ModifiedSince IS NULL OR c.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR c.ModifiedAt > @AfterModifiedAt
+            OR (c.ModifiedAt = @AfterModifiedAt AND CAST(c.Id AS nvarchar(64)) > @AfterId)
+          )
+    ORDER BY c.ModifiedAt, CAST(c.Id AS nvarchar(64));
 END
 GO
 
@@ -78,7 +106,26 @@ CREATE OR ALTER PROCEDURE xm.Customers_GetByIds
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Customers_GetByIds is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same columns/table as xm.Customers_GetChanged above, filtered by id list.
+    SELECT
+        XinfoId            = CAST(c.Id AS nvarchar(64)),
+        Name               = c.Name,
+        Code               = c.Code,
+        LegalName          = c.LegalName,
+        AccountType        = c.AccountType,
+        Category           = c.Category,
+        Industry           = c.Industry,
+        ParentXinfoId      = CAST(c.ParentId AS nvarchar(64)),
+        OwnerEmployeeCode  = c.OwnerEmployeeCode,
+        OrgUnitCode        = c.OrgUnitCode,
+        CreditStatus       = c.CreditStatus,
+        GstNumber          = c.GstNumber,
+        Phone              = c.Phone,
+        Email              = c.Email,
+        IsActive           = c.IsActive,
+        ModifiedAt         = c.ModifiedAt
+    FROM dbo.Customer AS c
+    INNER JOIN STRING_SPLIT(@XinfoIds, ',') AS ids ON CAST(c.Id AS nvarchar(64)) = ids.value;
 END
 GO
 
@@ -101,7 +148,34 @@ CREATE OR ALTER PROCEDURE xm.Sites_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Sites_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.CustomerSite with your real table.
+    SELECT TOP (@PageSize)
+        XinfoId          = CAST(s.Id AS nvarchar(64)),
+        CustomerXinfoId  = CAST(s.CustomerId AS nvarchar(64)),
+        Name             = s.Name,
+        SiteCode         = s.SiteCode,
+        SiteType         = s.SiteType,
+        IsPrimary        = s.IsPrimary,
+        AddressLine1     = s.AddressLine1,
+        AddressLine2     = s.AddressLine2,
+        Landmark         = s.Landmark,
+        City             = s.City,
+        District         = s.District,
+        State            = s.State,
+        PostalCode       = s.PostalCode,
+        CountryCode      = s.CountryCode,
+        Lat              = s.Lat,
+        Lon              = s.Lon,
+        IsActive         = s.IsActive,
+        ModifiedAt       = s.ModifiedAt
+    FROM dbo.CustomerSite AS s
+    WHERE (@ModifiedSince IS NULL OR s.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR s.ModifiedAt > @AfterModifiedAt
+            OR (s.ModifiedAt = @AfterModifiedAt AND CAST(s.Id AS nvarchar(64)) > @AfterId)
+          )
+    ORDER BY s.ModifiedAt, CAST(s.Id AS nvarchar(64));
 END
 GO
 
@@ -119,7 +193,27 @@ CREATE OR ALTER PROCEDURE xm.Contacts_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Contacts_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.CustomerContact with your real table.
+    SELECT TOP (@PageSize)
+        XinfoId          = CAST(k.Id AS nvarchar(64)),
+        CustomerXinfoId  = CAST(k.CustomerId AS nvarchar(64)),
+        SiteXinfoId      = CAST(k.SiteId AS nvarchar(64)),
+        FullName         = k.FullName,
+        Designation      = k.Designation,
+        Department       = k.Department,
+        Phone            = k.Phone,
+        Email            = k.Email,
+        IsPrimary        = k.IsPrimary,
+        IsActive         = k.IsActive,
+        ModifiedAt       = k.ModifiedAt
+    FROM dbo.CustomerContact AS k
+    WHERE (@ModifiedSince IS NULL OR k.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR k.ModifiedAt > @AfterModifiedAt
+            OR (k.ModifiedAt = @AfterModifiedAt AND CAST(k.Id AS nvarchar(64)) > @AfterId)
+          )
+    ORDER BY k.ModifiedAt, CAST(k.Id AS nvarchar(64));
 END
 GO
 
@@ -138,7 +232,26 @@ CREATE OR ALTER PROCEDURE xm.Assignments_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Assignments_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.CustomerAssignment with your real table. The gateway's paging
+    -- id for this procedure is the composite "CustomerXinfoId|EmployeeCode" (see
+    -- PullRepository.GetAssignmentsAsync) — keep the CONCAT(...) expression below exactly as the
+    -- id used in both the WHERE and ORDER BY clauses.
+    SELECT TOP (@PageSize)
+        CustomerXinfoId = CAST(a.CustomerId AS nvarchar(64)),
+        EmployeeCode    = a.EmployeeCode,
+        Role            = a.Role,
+        ValidFrom       = a.ValidFrom,
+        ValidTo         = a.ValidTo,
+        ModifiedAt      = a.ModifiedAt
+    FROM dbo.CustomerAssignment AS a
+    WHERE (@ModifiedSince IS NULL OR a.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR a.ModifiedAt > @AfterModifiedAt
+            OR (a.ModifiedAt = @AfterModifiedAt
+                AND CONCAT(CAST(a.CustomerId AS nvarchar(64)), '|', a.EmployeeCode) > @AfterId)
+          )
+    ORDER BY a.ModifiedAt, CONCAT(CAST(a.CustomerId AS nvarchar(64)), '|', a.EmployeeCode);
 END
 GO
 
@@ -157,7 +270,26 @@ CREATE OR ALTER PROCEDURE xm.Users_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Users_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.SalesRep with your real table. Paging id is EmployeeCode.
+    SELECT TOP (@PageSize)
+        EmployeeCode         = u.EmployeeCode,
+        FullName             = u.FullName,
+        Email                = u.Email,
+        Phone                = u.Phone,
+        Grade                = u.Grade,
+        Designation          = u.Designation,
+        OrgUnitCode          = u.OrgUnitCode,
+        ManagerEmployeeCode  = u.ManagerEmployeeCode,
+        IsActive             = u.IsActive,
+        ModifiedAt           = u.ModifiedAt
+    FROM dbo.SalesRep AS u
+    WHERE (@ModifiedSince IS NULL OR u.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR u.ModifiedAt > @AfterModifiedAt
+            OR (u.ModifiedAt = @AfterModifiedAt AND u.EmployeeCode > @AfterId)
+          )
+    ORDER BY u.ModifiedAt, u.EmployeeCode;
 END
 GO
 
@@ -174,7 +306,22 @@ CREATE OR ALTER PROCEDURE xm.OrgUnits_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.OrgUnits_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.OrgUnit with your real table. Paging id is Code.
+    SELECT TOP (@PageSize)
+        Code       = o.Code,
+        Name       = o.Name,
+        UnitType   = o.UnitType,
+        ParentCode = o.ParentCode,
+        IsActive   = o.IsActive,
+        ModifiedAt = o.ModifiedAt
+    FROM dbo.OrgUnit AS o
+    WHERE (@ModifiedSince IS NULL OR o.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR o.ModifiedAt > @AfterModifiedAt
+            OR (o.ModifiedAt = @AfterModifiedAt AND o.Code > @AfterId)
+          )
+    ORDER BY o.ModifiedAt, o.Code;
 END
 GO
 
@@ -201,7 +348,29 @@ CREATE OR ALTER PROCEDURE xm.SalesHistory_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.SalesHistory_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.SalesDocument with your real order/invoice table(s).
+    SELECT TOP (@PageSize)
+        XinfoId          = CAST(d.Id AS nvarchar(64)),
+        CustomerXinfoId  = CAST(d.CustomerId AS nvarchar(64)),
+        DocumentType     = d.DocumentType,
+        DocumentNo       = d.DocumentNo,
+        DocumentDate     = d.DocumentDate,
+        Amount           = d.Amount,
+        Currency         = d.Currency,
+        Quantity         = d.Quantity,
+        Uom              = d.Uom,
+        Status           = d.Status,
+        Summary          = d.Summary,
+        ModifiedAt       = d.ModifiedAt
+    FROM dbo.SalesDocument AS d
+    WHERE (@ModifiedSince IS NULL OR d.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR d.ModifiedAt > @AfterModifiedAt
+            OR (d.ModifiedAt = @AfterModifiedAt AND CAST(d.Id AS nvarchar(64)) > @AfterId)
+          )
+      AND (@CustomerXinfoId IS NULL OR CAST(d.CustomerId AS nvarchar(64)) = @CustomerXinfoId)
+    ORDER BY d.ModifiedAt, CAST(d.Id AS nvarchar(64));
 END
 GO
 
@@ -224,7 +393,35 @@ CREATE OR ALTER PROCEDURE xm.Opportunities_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Opportunities_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.Opportunity with your real table.
+    SELECT TOP (@PageSize)
+        XinfoId            = CAST(o.Id AS nvarchar(64)),
+        CustomerXinfoId    = CAST(o.CustomerId AS nvarchar(64)),
+        SiteXinfoId        = CAST(o.SiteId AS nvarchar(64)),
+        ContactXinfoId     = CAST(o.ContactId AS nvarchar(64)),
+        Title              = o.Title,
+        Description        = o.Description,
+        StageCode          = o.StageCode,
+        EstimatedValue     = o.EstimatedValue,
+        Currency           = o.Currency,
+        ProbabilityPct     = o.ProbabilityPct,
+        ExpectedCloseDate  = o.ExpectedCloseDate,
+        OwnerEmployeeCode  = o.OwnerEmployeeCode,
+        Source             = o.Source,
+        Competitor         = o.Competitor,
+        ClosedAt           = o.ClosedAt,
+        CloseReasonCode    = o.CloseReasonCode,
+        ActualValue        = o.ActualValue,
+        XmobileId          = o.XmobileId,
+        ModifiedAt         = o.ModifiedAt
+    FROM dbo.Opportunity AS o
+    WHERE (@ModifiedSince IS NULL OR o.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR o.ModifiedAt > @AfterModifiedAt
+            OR (o.ModifiedAt = @AfterModifiedAt AND CAST(o.Id AS nvarchar(64)) > @AfterId)
+          )
+    ORDER BY o.ModifiedAt, CAST(o.Id AS nvarchar(64));
 END
 GO
 
@@ -245,7 +442,24 @@ CREATE OR ALTER PROCEDURE xm.ExpenseStatus_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.ExpenseStatus_GetChanged is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.ExpenseApproval with your real table. ExternalRef must be the
+    -- @IdempotencyKey XMobile sent on the original xm.Expense_Push call — that is the join key.
+    SELECT TOP (@PageSize)
+        ExternalRef   = x.ExternalRef,
+        XinfoId       = CAST(x.Id AS nvarchar(64)),
+        Status        = x.Status,
+        Remark        = x.Remark,
+        SettledAmount = x.SettledAmount,
+        SettledOn     = x.SettledOn,
+        ModifiedAt    = x.ModifiedAt
+    FROM dbo.ExpenseApproval AS x
+    WHERE (@ModifiedSince IS NULL OR x.ModifiedAt >= @ModifiedSince)
+      AND (
+            @AfterModifiedAt IS NULL
+            OR x.ModifiedAt > @AfterModifiedAt
+            OR (x.ModifiedAt = @AfterModifiedAt AND x.ExternalRef > @AfterId)
+          )
+    ORDER BY x.ModifiedAt, x.ExternalRef;
 END
 GO
 
@@ -271,7 +485,20 @@ CREATE OR ALTER PROCEDURE xm.Reference_GetItems
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Reference_GetItems is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.ReferenceCode with your real code-list table, or a UNION of
+    -- several if each domain (EXPENSE_CATEGORY, VISIT_TYPE, VISIT_OUTCOME, OPPORTUNITY_STAGE,
+    -- SKIP_REASON, CLOSE_REASON) lives somewhere different today.
+    SELECT
+        Domain         = r.Domain,
+        Code           = r.Code,
+        Name           = r.Name,
+        ParentCode     = r.ParentCode,
+        SortOrder      = r.SortOrder,
+        IsActive       = r.IsActive,
+        AttributesJson = r.AttributesJson
+    FROM dbo.ReferenceCode AS r
+    WHERE @Domain IS NULL OR r.Domain = @Domain
+    ORDER BY r.Domain, r.SortOrder;
 END
 GO
 
@@ -291,7 +518,19 @@ CREATE OR ALTER PROCEDURE xm.Rates_GetCurrent
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Rates_GetCurrent is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.MileageRate with your real rate table, if you hold these at
+    -- all — if not, tell us and we will maintain them on our side instead (see README).
+    SELECT
+        RateType      = r.RateType,
+        Grade         = r.Grade,
+        CityTier      = r.CityTier,
+        TravelMode    = r.TravelMode,
+        Amount        = r.Amount,
+        Currency      = r.Currency,
+        EffectiveFrom = r.EffectiveFrom,
+        EffectiveTo   = r.EffectiveTo
+    FROM dbo.MileageRate AS r
+    WHERE r.EffectiveFrom <= @AsOf AND (r.EffectiveTo IS NULL OR r.EffectiveTo > @AsOf);
 END
 GO
 
@@ -336,7 +575,27 @@ CREATE OR ALTER PROCEDURE xm.Customer_Propose
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Customer_Propose is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] The idempotency check/insert shape below is the pattern every push
+    -- procedure in this file follows — replace dbo.Customer (and wherever you keep the
+    -- idempotency key: a column here, or a separate ledger table) with your real design.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(c.Id AS nvarchar(64))
+    FROM dbo.Customer AS c
+    WHERE c.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the prospect (unapproved account) + site + optional contact into your real
+    -- tables here, inside a transaction. Hold it wherever XInfo keeps accounts pending approval.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -359,7 +618,25 @@ CREATE OR ALTER PROCEDURE xm.Site_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Site_Add is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- dbo.CustomerSite with your real table.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(s.Id AS nvarchar(64))
+    FROM dbo.CustomerSite AS s
+    WHERE s.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the new site into your real table.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -378,7 +655,25 @@ CREATE OR ALTER PROCEDURE xm.Contact_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Contact_Add is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- dbo.CustomerContact with your real table.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(k.Id AS nvarchar(64))
+    FROM dbo.CustomerContact AS k
+    WHERE k.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the new contact into your real table.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -400,7 +695,21 @@ CREATE OR ALTER PROCEDURE xm.Site_CaptureGeo
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Site_CaptureGeo is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. This one updates
+    -- an existing site's coordinates rather than inserting a new row — replace dbo.CustomerSite
+    -- with your real table, and decide whether a field-captured Lat/Lon should ever be
+    -- overwritten by a later geocode (it generally shouldn't — see the remark above).
+    IF EXISTS (SELECT 1 FROM dbo.CustomerSite AS s WHERE s.SourceIdempotencyKey = @IdempotencyKey)
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @SiteXinfoId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: UPDATE dbo.CustomerSite SET Lat = @Lat, Lon = @Lon, ... WHERE Id = @SiteXinfoId;
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @SiteXinfoId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -437,7 +746,37 @@ CREATE OR ALTER PROCEDURE xm.Opportunity_Upsert
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Opportunity_Upsert is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.Opportunity with your real table. Two rules from the remark
+    -- above, both worth keeping even while this is a stub:
+    --   1. idempotency on @IdempotencyKey, same pattern as xm.Customer_Propose;
+    --   2. if @XinfoId already exists and its RepFieldsUpdatedAt is NEWER than the incoming
+    --      @RepFieldsUpdatedAt, THROW 50002 rather than applying the update — see below.
+    IF @XinfoId IS NOT NULL AND EXISTS (
+        SELECT 1 FROM dbo.Opportunity AS o
+        WHERE o.Id = @XinfoId AND o.RepFieldsUpdatedAt > @RepFieldsUpdatedAt
+    )
+    BEGIN
+        THROW 50002, 'A newer update already exists in XInfo for this opportunity', 1;
+    END
+
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(o.Id AS nvarchar(64))
+    FROM dbo.Opportunity AS o
+    WHERE o.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert or update dbo.Opportunity, keyed on @XinfoId when supplied, else create new
+    -- and record @XmobileOpportunityId so xm.Opportunities_GetChanged can return it as XmobileId.
+    DECLARE @NewId nvarchar(64) = COALESCE(@XinfoId, CAST(NEWID() AS nvarchar(64)));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -478,7 +817,27 @@ CREATE OR ALTER PROCEDURE xm.Visit_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Visit_Push is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- dbo.VisitCall with your real table. Store @DynamicAnswersJson as-is (nvarchar(max)) — do
+    -- not try to map it to columns, its shape changes per report template without an app release.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(v.Id AS nvarchar(64))
+    FROM dbo.VisitCall AS v
+    WHERE v.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the visit + report into your real table(s), and link @LinkedOpportunityIds
+    -- (comma-separated) if you track that relationship.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -504,7 +863,26 @@ CREATE OR ALTER PROCEDURE xm.Tour_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Tour_Push is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace dbo.Tour
+    -- with your real table. @DistanceByModeJson looks like {"RAIL":618000,"CAR":38000} — store
+    -- it as-is if you don't need to query by travel mode server-side.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(t.Id AS nvarchar(64))
+    FROM dbo.Tour AS t
+    WHERE t.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the completed tour into your real table.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -543,7 +921,28 @@ CREATE OR ALTER PROCEDURE xm.Expense_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Expense_Push is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] THE MOST IMPORTANT PROCEDURE IN THIS FILE (see the remark above) — the
+    -- idempotency check below MUST be watertight before this goes live. Same pattern as
+    -- xm.Customer_Propose above, replace dbo.Expense with your real table. @SuggestedAmount is
+    -- advisory only — apply your own approval policy, do not just accept it.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(e.Id AS nvarchar(64))
+    FROM dbo.Expense AS e
+    WHERE e.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert the expense into your real table, in PENDING/whatever your initial approval
+    -- state is. xm.ExpenseReceipt_Push calls follow immediately after for each attached receipt.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -563,7 +962,17 @@ CREATE OR ALTER PROCEDURE xm.ExpenseReceipt_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.ExpenseReceipt_Push is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.ExpenseReceipt with your real table. Unlike the other push
+    -- procedures, the gateway does not read a result row from this one (it "rides" the parent
+    -- xm.Expense_Push call — see SqlPushRepository.PushExpenseAsync) and it has no
+    -- @IdempotencyKey of its own; de-duplicate on @AttachmentId if this can be called twice.
+    -- Exactly one of @Url / @ContentBase64 will be supplied, never both.
+    IF NOT EXISTS (SELECT 1 FROM dbo.ExpenseReceipt WHERE AttachmentId = @AttachmentId)
+    BEGIN
+        -- TODO: INSERT INTO dbo.ExpenseReceipt (ExpenseId, XinfoExpenseId, AttachmentId,
+        --   FileName, MimeType, SizeBytes, Url, ContentBase64) VALUES (...);
+        SELECT 1; -- placeholder no-op so this stub compiles and runs without erroring
+    END
 END
 GO
 
@@ -592,7 +1001,26 @@ CREATE OR ALTER PROCEDURE xm.JourneySummary_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.JourneySummary_Push is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- dbo.JourneySummary with your real table. @AttendanceStatus is informational only — XMobile
+    -- is explicitly not the attendance system of record, please do not pay anyone from it.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = CAST(j.Id AS nvarchar(64))
+    FROM dbo.JourneySummary AS j
+    WHERE j.SourceIdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
+    -- TODO: insert or upsert (@EmployeeCode, @LocalDate) into your real table.
+    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+           WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
 
@@ -615,7 +1043,23 @@ CREATE OR ALTER PROCEDURE xm.Reconciliation_GetSummary
 AS
 BEGIN
     SET NOCOUNT ON;
-    THROW 50000, 'xm.Reconciliation_GetSummary is not implemented yet', 1;
+    -- [XInfo-DBA-TODO] Replace dbo.GatewayIdempotencyLedger with wherever you actually store
+    -- each entity's idempotency keys (or union across the real tables per @Entity — e.g.
+    -- dbo.Expense.SourceIdempotencyKey when @Entity = 'expense'). Two result sets are required,
+    -- in this order: (1) one summary row, (2) one row per ExternalRef (the IdempotencyKeys held).
+    SELECT
+        RecordCount = COUNT(*),
+        TotalAmount = SUM(l.Amount)
+    FROM dbo.GatewayIdempotencyLedger AS l
+    WHERE l.Entity = @Entity
+      AND l.CreatedAt >= @FromDate AND l.CreatedAt < @ToDate
+      AND (@EmployeeCode IS NULL OR l.EmployeeCode = @EmployeeCode);
+
+    SELECT l.IdempotencyKey
+    FROM dbo.GatewayIdempotencyLedger AS l
+    WHERE l.Entity = @Entity
+      AND l.CreatedAt >= @FromDate AND l.CreatedAt < @ToDate
+      AND (@EmployeeCode IS NULL OR l.EmployeeCode = @EmployeeCode);
 END
 GO
 
