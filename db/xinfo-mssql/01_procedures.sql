@@ -395,22 +395,27 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_OrgUnits_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.OrgUnit with your real table. Paging id is Code.
+    -- Sourced from dbo.SalesRegion (44 rows) — a flat list of geographic sales territories,
+    -- no parent hierarchy (no ParentID column exists) and no separate code, so Name doubles as
+    -- Code like elsewhere in this schema. Deliberately does NOT include dbo.Departments (the
+    -- HR org chart used for Users_GetChanged.OrgUnitCode) — that's a different, functional
+    -- hierarchy that doesn't fit this procedure's geographic UnitType enum, so it stays a
+    -- separate, unvalidated code rather than being force-fit in here.
     SELECT TOP (@PageSize)
-        Code       = o.Code,
-        Name       = o.Name,
-        UnitType   = o.UnitType,
-        ParentCode = o.ParentCode,
-        IsActive   = o.IsActive,
-        ModifiedAt = o.ModifiedAt
-    FROM dbo.OrgUnit AS o
-    WHERE (@ModifiedSince IS NULL OR o.ModifiedAt >= @ModifiedSince)
+        Code       = r.Name,
+        Name       = r.Name,
+        UnitType   = 'TERRITORY',
+        ParentCode = CAST(NULL AS nvarchar(50)),
+        IsActive   = CASE WHEN r.IsDeleted = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+        ModifiedAt = TODATETIMEOFFSET(r.ModifiedOn, '+05:30')
+    FROM dbo.SalesRegion r
+    WHERE (@ModifiedSince IS NULL OR r.ModifiedOn >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR o.ModifiedAt > @AfterModifiedAt
-            OR (o.ModifiedAt = @AfterModifiedAt AND o.Code > @AfterId)
+            OR r.ModifiedOn > @AfterModifiedAt
+            OR (r.ModifiedOn = @AfterModifiedAt AND r.Name > @AfterId)
           )
-    ORDER BY o.ModifiedAt, o.Code;
+    ORDER BY r.ModifiedOn, r.Name;
 END
 GO
 
