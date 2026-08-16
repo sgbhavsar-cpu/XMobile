@@ -618,20 +618,26 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Reference_GetItems
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.ReferenceCode with your real code-list table, or a UNION of
-    -- several if each domain (EXPENSE_CATEGORY, VISIT_TYPE, VISIT_OUTCOME, OPPORTUNITY_STAGE,
-    -- SKIP_REASON, CLOSE_REASON) lives somewhere different today.
+    -- Real data exists for only one of the six domains — OPPORTUNITY_STAGE, sourced from the
+    -- distinct values of dbo.Opportunities.Status (the field
+    -- xm.MobileGateway_Opportunities_GetChanged actually uses for StageCode; deliberately NOT
+    -- dbo.OpportunityCloseProbabilities, which despite being a proper lookup table with a
+    -- numeric Percentage column, is keyed off the 99.1%-empty OppStage column and uses a
+    -- different vocabulary — using it here would produce a reference list that doesn't match
+    -- what StageCode actually contains). The other five domains (EXPENSE_CATEGORY, VISIT_TYPE,
+    -- VISIT_OUTCOME, SKIP_REASON, CLOSE_REASON) have no lookup table and no free-text column
+    -- worth enumerating — they return nothing here rather than a fabricated list; per this
+    -- procedure's own contract note, XMobile maintains those locally instead.
     SELECT
-        Domain         = r.Domain,
-        Code           = r.Code,
-        Name           = r.Name,
-        ParentCode     = r.ParentCode,
-        SortOrder      = r.SortOrder,
-        IsActive       = r.IsActive,
-        AttributesJson = r.AttributesJson
-    FROM dbo.ReferenceCode AS r
-    WHERE @Domain IS NULL OR r.Domain = @Domain
-    ORDER BY r.Domain, r.SortOrder;
+        Domain         = 'OPPORTUNITY_STAGE',
+        Code           = s.Status,
+        Name           = s.Status,
+        ParentCode     = CAST(NULL AS nvarchar(50)),
+        SortOrder      = CAST(ROW_NUMBER() OVER (ORDER BY s.Status) AS int),
+        IsActive       = CAST(1 AS bit),
+        AttributesJson = CAST(NULL AS nvarchar(max))
+    FROM (SELECT DISTINCT Status FROM dbo.Opportunities WHERE Status IS NOT NULL) s
+    WHERE @Domain IS NULL OR @Domain = 'OPPORTUNITY_STAGE';
 END
 GO
 
