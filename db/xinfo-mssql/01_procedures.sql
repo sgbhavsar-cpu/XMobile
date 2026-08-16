@@ -1147,13 +1147,19 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Visit_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
-    -- dbo.VisitCall with your real table. Store @DynamicAnswersJson as-is (nvarchar(max)) — do
-    -- not try to map it to columns, its shape changes per report template without an app release.
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose. XInfo's closest real
+    -- table, dbo.EmployeeVisitReport (171,745 rows), has a genuine visit-report shape
+    -- (EmployeeID, AccountID, ContactID, OpportunityID, MeetingPurpose, Status) but none of
+    -- this contract's richer fields — no check-in/out times, geofence, order-intent,
+    -- competitor-sighting, or dynamic questionnaire concept. Core fields land in
+    -- EmployeeVisitReport (so XInfo's own reporting sees the visit); everything else goes into
+    -- a new dbo.GatewayVisitDetail table, 1:1 keyed on the same XinfoId, exactly as
+    -- @DynamicAnswersJson's own instruction says (store as-is, don't try to map it to columns).
+    -- @LinkedOpportunityIds is comma-separated; only its first id links to
+    -- EmployeeVisitReport.OpportunityID (a single column), but the full list is preserved as-is
+    -- in GatewayVisitDetail.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(v.Id AS nvarchar(64))
-    FROM dbo.VisitCall AS v
-    WHERE v.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -1162,11 +1168,50 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the visit + report into your real table(s), and link @LinkedOpportunityIds
-    -- (comma-separated) if you track that relationship.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    IF NOT EXISTS (SELECT 1 FROM dbo.Accounts WHERE ID = @CustomerXinfoId)
+    BEGIN
+        THROW 50004, 'CustomerXinfoId does not exist', 1;
+    END
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    DECLARE @NewVisitId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @EmployeeId nvarchar(64) = (SELECT TOP 1 ID FROM XStudio_Configuration.dbo.XStudio_User_Mst_Tbl WHERE Name = @EmployeeCode);
+    DECLARE @FirstOpportunityId nvarchar(64) = NULLIF(LTRIM(RTRIM(
+        LEFT(@LinkedOpportunityIds + ',', CHARINDEX(',', @LinkedOpportunityIds + ',') - 1)
+    )), '');
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.EmployeeVisitReport (ID, VisitID, EmployeeID, ContactID, AccountID,
+            MeetingPurpose, Status, Description, OpportunityID, Submittedon, submittedby,
+            IsDeleted, Source, CreatedOn, ModifiedOn)
+        VALUES (@NewVisitId, CAST(@VisitId AS nvarchar(64)), @EmployeeId, @ContactXinfoId, @CustomerXinfoId,
+            @VisitTypeCode, @OutcomeCode, @Summary, @FirstOpportunityId,
+            COALESCE(@CheckOutAt, @OccurredAt), @EmployeeCode,
+            0, 'XMobile', @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.GatewayVisitDetail (VisitXinfoId, XmobileVisitId, SiteXinfoId, VisitTypeCode,
+            CheckInAt, CheckOutAt, DurationMin, CheckInLat, CheckInLon, CheckInDistanceM,
+            IsOutOfGeofence, OutOfFenceReasonCode, IsUnplanned, NextAction, FollowUpDate,
+            OrderIntent, OrderValueEst, CompetitorSeen, CompetitorNotes, DynamicAnswersJson,
+            LinkedOpportunityIds, CreatedAt)
+        VALUES (@NewVisitId, @VisitId, @SiteXinfoId, @VisitTypeCode,
+            @CheckInAt, @CheckOutAt, @DurationMin, @CheckInLat, @CheckInLon, @CheckInDistanceM,
+            @IsOutOfGeofence, @OutOfFenceReasonCode, @IsUnplanned, @NextAction, @FollowUpDate,
+            @OrderIntent, @OrderValueEst, @CompetitorSeen, @CompetitorNotes, @DynamicAnswersJson,
+            @LinkedOpportunityIds, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'visit', @NewVisitId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewVisitId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
