@@ -659,6 +659,13 @@ BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] Replace dbo.MileageRate with your real rate table, if you hold these at
     -- all — if not, tell us and we will maintain them on our side instead (see README).
+    --
+    -- RESEARCH NOTE (left as a skeleton deliberately): searched for mileage/per-diem/travel
+    -- rate tables across this database and found none. The only rate-shaped tables that exist
+    -- (EAC_EngineeringMandayRate, YearWiseBandLevelRates) are engineering billing rates, not
+    -- travel reimbursement — a different concept entirely. This is exactly the case this
+    -- procedure's own comment above anticipates: XInfo does not hold these, so XMobile should
+    -- maintain mileage/per-diem rates locally rather than pulling them from here.
     SELECT
         RateType      = r.RateType,
         Grade         = r.Grade,
