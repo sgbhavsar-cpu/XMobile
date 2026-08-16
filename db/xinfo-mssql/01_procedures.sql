@@ -253,27 +253,32 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Contacts_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.CustomerContact with your real table.
+    -- dbo.AccountContactDetails has no primary-contact flag (checked: 6,605 accounts have
+    -- contacts, some with hundreds) — IsPrimary is always false rather than guessing at a
+    -- tiebreak rule. IsActive combines IsDeleted with IsLeft (a "this person left the company"
+    -- flag XInfo tracks separately from soft-delete). ModifiedAt falls back to CreatedOn for
+    -- the 149 rows (0.77%) with no ModifiedOn.
     SELECT TOP (@PageSize)
-        XinfoId          = CAST(k.Id AS nvarchar(64)),
-        CustomerXinfoId  = CAST(k.CustomerId AS nvarchar(64)),
-        SiteXinfoId      = CAST(k.SiteId AS nvarchar(64)),
-        FullName         = k.FullName,
+        XinfoId          = k.ID,
+        CustomerXinfoId  = k.AccountId,
+        SiteXinfoId      = CAST(NULL AS nvarchar(64)),
+        FullName         = k.ContactPersonname,
         Designation      = k.Designation,
         Department       = k.Department,
-        Phone            = k.Phone,
-        Email            = k.Email,
-        IsPrimary        = k.IsPrimary,
-        IsActive         = k.IsActive,
-        ModifiedAt       = k.ModifiedAt
-    FROM dbo.CustomerContact AS k
-    WHERE (@ModifiedSince IS NULL OR k.ModifiedAt >= @ModifiedSince)
+        Phone            = k.ConatctNumber,
+        Email            = k.ConatctEmailid,
+        IsPrimary        = CAST(0 AS bit),
+        IsActive         = CASE WHEN k.IsDeleted = 1 OR k.IsLeft = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+        ModifiedAt       = TODATETIMEOFFSET(COALESCE(k.ModifiedOn, k.CreatedOn), '+05:30')
+    FROM dbo.AccountContactDetails k
+    WHERE k.AccountId IS NOT NULL
+      AND (@ModifiedSince IS NULL OR COALESCE(k.ModifiedOn, k.CreatedOn) >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR k.ModifiedAt > @AfterModifiedAt
-            OR (k.ModifiedAt = @AfterModifiedAt AND CAST(k.Id AS nvarchar(64)) > @AfterId)
+            OR TODATETIMEOFFSET(COALESCE(k.ModifiedOn, k.CreatedOn), '+05:30') > @AfterModifiedAt
+            OR (TODATETIMEOFFSET(COALESCE(k.ModifiedOn, k.CreatedOn), '+05:30') = @AfterModifiedAt AND k.ID > @AfterId)
           )
-    ORDER BY k.ModifiedAt, CAST(k.Id AS nvarchar(64));
+    ORDER BY COALESCE(k.ModifiedOn, k.CreatedOn), k.ID;
 END
 GO
 
