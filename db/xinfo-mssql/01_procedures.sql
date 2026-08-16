@@ -1238,13 +1238,13 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Tour_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace dbo.Tour
-    -- with your real table. @DistanceByModeJson looks like {"RAIL":618000,"CAR":38000} — store
-    -- it as-is if you don't need to query by travel mode server-side.
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose. XInfo has no
+    -- tour/trip/itinerary table or concept of any kind — unlike Visit_Push (where a partial
+    -- real table existed to enrich), there is nothing to piggyback on here, so the full push
+    -- payload lands in a new dedicated dbo.GatewayTour table, one row per tour.
+    -- @DistanceByModeJson is stored as-is per its own instruction.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(t.Id AS nvarchar(64))
-    FROM dbo.Tour AS t
-    WHERE t.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -1253,10 +1253,29 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the completed tour into your real table.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @NewTourId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.GatewayTour (XinfoId, XmobileTourId, EmployeeCode, Title,
+            PlannedStartDate, PlannedEndDate, ActualStartAt, ActualEndAt, DestinationCity,
+            VisitCount, TotalDistanceM, DistanceByModeJson, TotalExpenseAmount, CreatedAt)
+        VALUES (@NewTourId, @TourId, @EmployeeCode, @Title,
+            @PlannedStartDate, @PlannedEndDate, @ActualStartAt, @ActualEndAt, @DestinationCity,
+            @VisitCount, @TotalDistanceM, @DistanceByModeJson, @TotalExpenseAmount, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'tour', @NewTourId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewTourId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
