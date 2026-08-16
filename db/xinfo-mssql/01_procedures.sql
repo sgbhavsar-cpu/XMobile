@@ -442,29 +442,38 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_SalesHistory_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.SalesDocument with your real order/invoice table(s).
+    -- Sourced from dbo.Invoices only (27,135 rows, direct AccountID link) — DocumentType is
+    -- 'RETURN' when Status='Returned', else 'INVOICE'. ORDER is a known gap: the closest real
+    -- data, dbo.CloseWonOrderForm, links to OpportunityID rather than AccountID, so surfacing
+    -- it needs the Opportunity->Account join xm.MobileGateway_Opportunities_GetChanged
+    -- establishes — revisit once that lands. No Currency column exists on Invoices (only a
+    -- CurrencyRate to convert to INR), so Currency is hardcoded 'INR'; Uom has no source here
+    -- either (it only exists on CloseWonOrderForm) and is always NULL. DocumentDate/Amount
+    -- fall back to CreatedOn/0 for the ~2% of rows missing InvoiceDate/TotalAmount, since the
+    -- contract has both as non-nullable.
     SELECT TOP (@PageSize)
-        XinfoId          = CAST(d.Id AS nvarchar(64)),
-        CustomerXinfoId  = CAST(d.CustomerId AS nvarchar(64)),
-        DocumentType     = d.DocumentType,
-        DocumentNo       = d.DocumentNo,
-        DocumentDate     = d.DocumentDate,
-        Amount           = d.Amount,
-        Currency         = d.Currency,
-        Quantity         = d.Quantity,
-        Uom              = d.Uom,
-        Status           = d.Status,
-        Summary          = d.Summary,
-        ModifiedAt       = d.ModifiedAt
-    FROM dbo.SalesDocument AS d
-    WHERE (@ModifiedSince IS NULL OR d.ModifiedAt >= @ModifiedSince)
+        XinfoId          = i.ID,
+        CustomerXinfoId  = i.AccountID,
+        DocumentType     = CASE WHEN i.Status = 'Returned' THEN 'RETURN' ELSE 'INVOICE' END,
+        DocumentNo       = i.InvoiceNo,
+        DocumentDate     = TODATETIMEOFFSET(CAST(COALESCE(i.InvoiceDate, CAST(i.CreatedOn AS date)) AS datetime), '+05:30'),
+        Amount           = COALESCE(i.TotalAmount, 0),
+        Currency         = 'INR',
+        Quantity         = i.Quantity,
+        Uom              = CAST(NULL AS nvarchar(20)),
+        Status           = i.Status,
+        Summary          = i.InvoiceDescription,
+        ModifiedAt       = TODATETIMEOFFSET(COALESCE(i.ModifiedOn, i.CreatedOn), '+05:30')
+    FROM dbo.Invoices i
+    WHERE i.AccountID IS NOT NULL
+      AND (@ModifiedSince IS NULL OR COALESCE(i.ModifiedOn, i.CreatedOn) >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR d.ModifiedAt > @AfterModifiedAt
-            OR (d.ModifiedAt = @AfterModifiedAt AND CAST(d.Id AS nvarchar(64)) > @AfterId)
+            OR COALESCE(i.ModifiedOn, i.CreatedOn) > @AfterModifiedAt
+            OR (COALESCE(i.ModifiedOn, i.CreatedOn) = @AfterModifiedAt AND i.ID > @AfterId)
           )
-      AND (@CustomerXinfoId IS NULL OR CAST(d.CustomerId AS nvarchar(64)) = @CustomerXinfoId)
-    ORDER BY d.ModifiedAt, CAST(d.Id AS nvarchar(64));
+      AND (@CustomerXinfoId IS NULL OR i.AccountID = @CustomerXinfoId)
+    ORDER BY COALESCE(i.ModifiedOn, i.CreatedOn), i.ID;
 END
 GO
 
