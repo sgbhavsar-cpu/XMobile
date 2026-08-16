@@ -101,8 +101,8 @@ is a shared key (`X-Gateway-Key`), compared in fixed time; both services sit on 
 network and there is no token issuer that spans them. An unset key refuses every request
 rather than allowing all of them — this service can write into the company's CRM.
 
-Readiness stays red until `xm.Health_Check` answers, so a half-deployed DBA release is caught
-before traffic reaches it.
+Readiness stays red until `xm.MobileGateway_Health_Check` answers, so a half-deployed DBA
+release is caught before traffic reaches it.
 
 ## 8. What is verified, and what is not
 
@@ -112,11 +112,11 @@ skipped on a duplicate, ordering token on opportunity updates, error classificat
 drift test that fails the build if the procedures named in C# and those declared in
 `db/xinfo-mssql/01_procedures.sql` ever diverge in either direction.
 
-**Not verified here:** the procedures themselves. No SQL Server is available in this
-environment, and the bodies do not exist yet — every stub currently throws
-"not implemented yet". Until the DBA's first release lands and we run against a real
-instance, the result-set shapes are an agreement, not a fact. The first integration test
-against their dev database is the thing that turns this from a contract into working software.
+**Not verified here:** most of the procedure bodies. A local Docker SQL Server restored from a
+real XInfo backup (`db/xinfo-mssql/docker-compose.yml`) let us implement and hand-verify
+`xm.MobileGateway_Customers_GetChanged` against real `dbo.Accounts` data — the rest are still
+`[XInfo-DBA-TODO]` skeletons. Until every procedure has gone through the same study-and-verify
+pass, the remaining result-set shapes are an agreement, not a fact.
 
 A note on the drift test: its first version compared with `Contains`, which passed happily when
 `xm.Expense_Push` was renamed to `xm.Expense_PushRenamed` — the old name is a substring of the
@@ -132,9 +132,9 @@ Ordered by what blocks us soonest:
 2. **Confirmation of the result-set columns** in `db/xinfo-mssql/01_procedures.sql`, especially
    where we have guessed at what XInfo holds: `Grade`, `CreditStatus`, `OrgUnitCode`.
 3. **Does XInfo hold site coordinates at all?** If there is nowhere to put `Lat`/`Lon`, we drop
-   `xm.Site_CaptureGeo` and keep field-captured positions on our side only.
+   `xm.MobileGateway_Site_CaptureGeo` and keep field-captured positions on our side only.
 4. **Does XInfo hold mileage and per-diem rates?** If not, we maintain them in XMobile's admin
-   and drop `xm.Rates_GetCurrent`.
+   and drop `xm.MobileGateway_Rates_GetCurrent`.
 5. **Receipts: URL or bytes?** URL keeps payloads small but needs XInfo to reach our object
    store across the network.
 6. **How does a rejected prospect come back to us?** Our rep is already visiting them.

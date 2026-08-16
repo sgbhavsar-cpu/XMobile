@@ -27,6 +27,9 @@ build/
 appsettings.Local.json
 .env
 
+# XInfo legacy DB backups (real customer data, tens of GB) — local dev restore only, never commit
+/XInfoDB/
+
 # Flutter app
 app/.dart_tool/
 app/build/

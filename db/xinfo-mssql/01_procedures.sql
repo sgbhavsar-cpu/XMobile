@@ -58,7 +58,7 @@ GO
 
    NOTE: inactive/deleted customers must still be returned with IsActive = 0. XMobile
    deactivates rather than deletes — visits already recorded against them must keep resolving. */
-CREATE OR ALTER PROCEDURE xm.Customers_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Customers_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -66,47 +66,59 @@ CREATE OR ALTER PROCEDURE xm.Customers_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.Customer below with your real table(s)/view and adjust the
-    -- column expressions on the left of each "=" to pull from it. Keep the keyset WHERE/ORDER BY
-    -- shape as-is — the gateway relies on it for stable paging (every other _GetChanged
-    -- procedure in this file follows the identical shape).
+    -- Sourced from dbo.Accounts. Two fields have no equivalent in XInfo and are always NULL:
+    -- LegalName (CustomerName is a redundant copy of Name, not a distinct legal name) and Email
+    -- (no account-level email column exists — only per-contact, via AccountContactDetails,
+    -- which xm.MobileGateway_Contacts_GetChanged sources). CreditStatus is also left NULL: the
+    -- only candidate field, Status, is really an approval-workflow flag ("Approved"/NULL), not
+    -- a credit concept, so mapping it here would be misleading. Industry only resolves for
+    -- ~26% of populated values against dbo.Industry (stale GUIDs from a past migration) — kept
+    -- anyway since partial data beats none, and recent rows resolve much better than old ones.
+    -- ModifiedAt: dbo.Accounts.ModifiedOn is a plain datetime with no stored offset; XInfo's
+    -- clock is IST, so TODATETIMEOFFSET stamps +05:30 without shifting the wall-clock value.
     SELECT TOP (@PageSize)
-        XinfoId            = CAST(c.Id AS nvarchar(64)),
-        Name               = c.Name,
-        Code               = c.Code,
-        LegalName          = c.LegalName,
-        AccountType        = c.AccountType,
-        Category           = c.Category,
-        Industry           = c.Industry,
-        ParentXinfoId      = CAST(c.ParentId AS nvarchar(64)),
-        OwnerEmployeeCode  = c.OwnerEmployeeCode,
-        OrgUnitCode        = c.OrgUnitCode,
-        CreditStatus       = c.CreditStatus,
-        GstNumber          = c.GstNumber,
-        Phone              = c.Phone,
-        Email              = c.Email,
-        IsActive           = c.IsActive,
-        ModifiedAt         = c.ModifiedAt
-    FROM dbo.Customer AS c
-    WHERE (@ModifiedSince IS NULL OR c.ModifiedAt >= @ModifiedSince)
+        XinfoId            = a.ID,
+        Name               = a.Name,
+        Code               = a.Abbreviation,
+        LegalName          = CAST(NULL AS nvarchar(200)),
+        AccountType        = a.AccountType,
+        Category           = a.Businesstype,
+        Industry           = ind.Name,
+        ParentXinfoId      = a.ParentID,
+        OwnerEmployeeCode  = u.Name,
+        OrgUnitCode        = sr.Name,
+        CreditStatus       = CAST(NULL AS nvarchar(50)),
+        GstNumber          = a.GSTRegistrationnumber,
+        Phone              = a.Phone,
+        Email              = CAST(NULL AS nvarchar(200)),
+        IsActive           = CASE WHEN a.IsDeleted = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+        ModifiedAt         = TODATETIMEOFFSET(a.ModifiedOn, '+05:30')
+    FROM dbo.Accounts a
+    -- OwnerEmployeeCode requires cross-database read access to XStudio_Configuration, which
+    -- the account this procedure runs under does not have by default — grant it, or ask XInfo
+    -- to replicate a local copy of XStudio_User_Mst_Tbl into this database instead.
+    LEFT JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u ON u.ID = a.AssignedUserID
+    LEFT JOIN dbo.SalesRegion sr ON sr.ID = a.SalesRegionId
+    LEFT JOIN dbo.Industry ind ON ind.ID = a.Industry
+    WHERE (@ModifiedSince IS NULL OR TODATETIMEOFFSET(a.ModifiedOn, '+05:30') >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR c.ModifiedAt > @AfterModifiedAt
-            OR (c.ModifiedAt = @AfterModifiedAt AND CAST(c.Id AS nvarchar(64)) > @AfterId)
+            OR TODATETIMEOFFSET(a.ModifiedOn, '+05:30') > @AfterModifiedAt
+            OR (TODATETIMEOFFSET(a.ModifiedOn, '+05:30') = @AfterModifiedAt AND a.ID > @AfterId)
           )
-    ORDER BY c.ModifiedAt, CAST(c.Id AS nvarchar(64));
+    ORDER BY a.ModifiedOn, a.ID;
 END
 GO
 
 /* Targeted refresh for specific ids (used after a change notification).
    @XinfoIds is comma-separated; STRING_SPLIT is fine.
-   RESULT SET: identical to xm.Customers_GetChanged. */
-CREATE OR ALTER PROCEDURE xm.Customers_GetByIds
+   RESULT SET: identical to xm.MobileGateway_Customers_GetChanged. */
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Customers_GetByIds
     @XinfoIds nvarchar(max)
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same columns/table as xm.Customers_GetChanged above, filtered by id list.
+    -- [XInfo-DBA-TODO] Same columns/table as xm.MobileGateway_Customers_GetChanged above, filtered by id list.
     SELECT
         XinfoId            = CAST(c.Id AS nvarchar(64)),
         Name               = c.Name,
@@ -139,8 +151,8 @@ GO
      Lat float null, Lon float null, IsActive bit, ModifiedAt datetimeoffset
 
    Lat/Lon may be NULL — we expect that. XMobile captures coordinates in the field and
-   pushes them back via xm.Site_CaptureGeo. */
-CREATE OR ALTER PROCEDURE xm.Sites_GetChanged
+   pushes them back via xm.MobileGateway_Site_CaptureGeo. */
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Sites_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -185,7 +197,7 @@ GO
      FullName nvarchar(200), Designation nvarchar(100) null, Department nvarchar(100) null,
      Phone nvarchar(50) null, Email nvarchar(200) null, IsPrimary bit, IsActive bit,
      ModifiedAt datetimeoffset */
-CREATE OR ALTER PROCEDURE xm.Contacts_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Contacts_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -224,7 +236,7 @@ GO
      ValidFrom datetimeoffset, ValidTo datetimeoffset null, ModifiedAt datetimeoffset
 
    Role is one of PRIMARY / SECONDARY / SUPPORT. Paging id is CustomerXinfoId|EmployeeCode. */
-CREATE OR ALTER PROCEDURE xm.Assignments_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Assignments_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -262,7 +274,7 @@ GO
      Phone nvarchar(50) null, Grade nvarchar(20) null, Designation nvarchar(100) null,
      OrgUnitCode nvarchar(50) null, ManagerEmployeeCode nvarchar(50) null, IsActive bit,
      ModifiedAt datetimeoffset */
-CREATE OR ALTER PROCEDURE xm.Users_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Users_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -298,7 +310,7 @@ GO
      Code nvarchar(50), Name nvarchar(200), UnitType nvarchar(20), ParentCode nvarchar(50) null,
      IsActive bit, ModifiedAt datetimeoffset
    UnitType is one of COMPANY / ZONE / REGION / AREA / TERRITORY. */
-CREATE OR ALTER PROCEDURE xm.OrgUnits_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_OrgUnits_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -339,7 +351,7 @@ GO
 
    DocumentType is one of ORDER / INVOICE / RETURN.
    @CustomerXinfoId narrows to one customer; NULL means all. */
-CREATE OR ALTER PROCEDURE xm.SalesHistory_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_SalesHistory_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -385,7 +397,7 @@ GO
      OwnerEmployeeCode nvarchar(50) null, Source nvarchar(50) null, Competitor nvarchar(200) null,
      ClosedAt datetimeoffset null, CloseReasonCode nvarchar(50) null,
      ActualValue decimal(18,2) null, XmobileId uniqueidentifier null, ModifiedAt datetimeoffset */
-CREATE OR ALTER PROCEDURE xm.Opportunities_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Opportunities_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -434,7 +446,7 @@ GO
      SettledOn datetimeoffset null, ModifiedAt datetimeoffset
 
    Status is one of PENDING / APPROVED / REJECTED / PAID. */
-CREATE OR ALTER PROCEDURE xm.ExpenseStatus_GetChanged
+CREATE OR ALTER PROCEDURE xm.MobileGateway_ExpenseStatus_GetChanged
     @ModifiedSince    datetimeoffset = NULL,
     @AfterModifiedAt  datetimeoffset = NULL,
     @AfterId          nvarchar(64)   = NULL,
@@ -443,7 +455,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] Replace dbo.ExpenseApproval with your real table. ExternalRef must be the
-    -- @IdempotencyKey XMobile sent on the original xm.Expense_Push call — that is the join key.
+    -- @IdempotencyKey XMobile sent on the original xm.MobileGateway_Expense_Push call — that is the join key.
     SELECT TOP (@PageSize)
         ExternalRef   = x.ExternalRef,
         XinfoId       = CAST(x.Id AS nvarchar(64)),
@@ -480,7 +492,7 @@ GO
      {"probabilityPct":75,"isWon":false,"isLost":false,"requiresReason":false}
    and for EXPENSE_CATEGORY:
      {"requiresReceipt":true,"receiptThreshold":300,"requiresRoute":false,"dailyCap":800} */
-CREATE OR ALTER PROCEDURE xm.Reference_GetItems
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Reference_GetItems
     @Domain nvarchar(50) = NULL
 AS
 BEGIN
@@ -513,7 +525,7 @@ GO
    RateType is one of MILEAGE_PER_KM / PER_DIEM_FULL / PER_DIEM_HALF / PER_DIEM_TRAVEL /
    LODGING_CAP.
    If XInfo does not hold these, tell us and we will maintain them on our side instead. */
-CREATE OR ALTER PROCEDURE xm.Rates_GetCurrent
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Rates_GetCurrent
     @AsOf datetimeoffset
 AS
 BEGIN
@@ -546,8 +558,8 @@ GO
    store the pairing.
 
    The rep is already visiting this prospect, so a rejection needs to reach us: expose it
-   through xm.Customers_GetChanged with IsActive = 0, or tell us where else to look. */
-CREATE OR ALTER PROCEDURE xm.Customer_Propose
+   through xm.MobileGateway_Customers_GetChanged with IsActive = 0, or tell us where else to look. */
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Customer_Propose
     @MessageId          uniqueidentifier,
     @IdempotencyKey     nvarchar(200),
     @OccurredAt         datetimeoffset,
@@ -601,7 +613,7 @@ GO
 
 /* A new site on an existing customer — a second warehouse, a moved shop. No approval gate:
    these change constantly and gating them means reps stop recording them. */
-CREATE OR ALTER PROCEDURE xm.Site_Add
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Site_Add
     @MessageId       uniqueidentifier,
     @IdempotencyKey  nvarchar(200),
     @OccurredAt      datetimeoffset,
@@ -618,7 +630,7 @@ CREATE OR ALTER PROCEDURE xm.Site_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
     -- dbo.CustomerSite with your real table.
     DECLARE @ExistingId nvarchar(64);
     SELECT @ExistingId = CAST(s.Id AS nvarchar(64))
@@ -641,7 +653,7 @@ END
 GO
 
 /* A new contact on an existing customer. */
-CREATE OR ALTER PROCEDURE xm.Contact_Add
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Contact_Add
     @MessageId        uniqueidentifier,
     @IdempotencyKey   nvarchar(200),
     @OccurredAt       datetimeoffset,
@@ -655,7 +667,7 @@ CREATE OR ALTER PROCEDURE xm.Contact_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
     -- dbo.CustomerContact with your real table.
     DECLARE @ExistingId nvarchar(64);
     SELECT @ExistingId = CAST(k.Id AS nvarchar(64))
@@ -681,7 +693,7 @@ GO
    Worth taking seriously: an address geocoded to a street centroid can be hundreds of
    metres out, and this one was measured on the doorstep. If XInfo has nowhere to keep
    Lat/Lon, say so — we will hold it on our side and skip this call. */
-CREATE OR ALTER PROCEDURE xm.Site_CaptureGeo
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Site_CaptureGeo
     @MessageId      uniqueidentifier,
     @IdempotencyKey nvarchar(200),
     @OccurredAt     datetimeoffset,
@@ -695,7 +707,7 @@ CREATE OR ALTER PROCEDURE xm.Site_CaptureGeo
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. This one updates
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. This one updates
     -- an existing site's coordinates rather than inserting a new row — replace dbo.CustomerSite
     -- with your real table, and decide whether a field-captured Lat/Lon should ever be
     -- overwritten by a later geocode (it generally shouldn't — see the remark above).
@@ -724,7 +736,7 @@ GO
    @RepFieldsUpdatedAt is an ordering token. If it is OLDER than what you already hold,
    please reject with THROW 50002 rather than applying it — that is a rep's offline edit
    arriving after someone changed the deal in XInfo, and yours should win. */
-CREATE OR ALTER PROCEDURE xm.Opportunity_Upsert
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Opportunity_Upsert
     @MessageId              uniqueidentifier,
     @IdempotencyKey         nvarchar(200),
     @OccurredAt             datetimeoffset,
@@ -748,7 +760,7 @@ BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] Replace dbo.Opportunity with your real table. Two rules from the remark
     -- above, both worth keeping even while this is a stub:
-    --   1. idempotency on @IdempotencyKey, same pattern as xm.Customer_Propose;
+    --   1. idempotency on @IdempotencyKey, same pattern as xm.MobileGateway_Customer_Propose;
     --   2. if @XinfoId already exists and its RepFieldsUpdatedAt is NEWER than the incoming
     --      @RepFieldsUpdatedAt, THROW 50002 rather than applying the update — see below.
     IF @XinfoId IS NOT NULL AND EXISTS (
@@ -772,7 +784,7 @@ BEGIN
     END
 
     -- TODO: insert or update dbo.Opportunity, keyed on @XinfoId when supplied, else create new
-    -- and record @XmobileOpportunityId so xm.Opportunities_GetChanged can return it as XmobileId.
+    -- and record @XmobileOpportunityId so xm.MobileGateway_Opportunities_GetChanged can return it as XmobileId.
     DECLARE @NewId nvarchar(64) = COALESCE(@XinfoId, CAST(NEWID() AS nvarchar(64)));
 
     SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
@@ -785,7 +797,7 @@ GO
    changes without an app release — please store it as-is (nvarchar(max)); do not try to
    map it to columns.
    @LinkedOpportunityIds is comma-separated: which deals this call moved. */
-CREATE OR ALTER PROCEDURE xm.Visit_Push
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Visit_Push
     @MessageId             uniqueidentifier,
     @IdempotencyKey        nvarchar(200),
     @OccurredAt            datetimeoffset,
@@ -817,7 +829,7 @@ CREATE OR ALTER PROCEDURE xm.Visit_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
     -- dbo.VisitCall with your real table. Store @DynamicAnswersJson as-is (nvarchar(max)) — do
     -- not try to map it to columns, its shape changes per report template without an app release.
     DECLARE @ExistingId nvarchar(64);
@@ -844,7 +856,7 @@ GO
 /* A completed tour: the multi-day trip a rep went on, with its distance and cost.
    @DistanceByModeJson looks like {"RAIL":618000,"CAR":38000} — kilometres by rail must not
    be reimbursed as kilometres by car. */
-CREATE OR ALTER PROCEDURE xm.Tour_Push
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Tour_Push
     @MessageId           uniqueidentifier,
     @IdempotencyKey      nvarchar(200),
     @OccurredAt          datetimeoffset,
@@ -863,7 +875,7 @@ CREATE OR ALTER PROCEDURE xm.Tour_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace dbo.Tour
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace dbo.Tour
     -- with your real table. @DistanceByModeJson looks like {"RAIL":618000,"CAR":38000} — store
     -- it as-is if you don't need to query by travel mode server-side.
     DECLARE @ExistingId nvarchar(64);
@@ -890,12 +902,12 @@ GO
    XInfo owns approval and settlement, so an expense that fails to land here is money the
    rep does not get back. Two consequences:
      * idempotency on @IdempotencyKey must be watertight — we retry aggressively;
-     * xm.Reconciliation_GetSummary must be able to prove what you hold, so our nightly job
+     * xm.MobileGateway_Reconciliation_GetSummary must be able to prove what you hold, so our nightly job
        can spot anything that never arrived.
 
    @SuggestedAmount is what our synced rate tables computed. It is advisory — please apply
    your own policy and ignore it if it disagrees. */
-CREATE OR ALTER PROCEDURE xm.Expense_Push
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Expense_Push
     @MessageId       uniqueidentifier,
     @IdempotencyKey  nvarchar(200),
     @OccurredAt      datetimeoffset,
@@ -923,7 +935,7 @@ BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] THE MOST IMPORTANT PROCEDURE IN THIS FILE (see the remark above) — the
     -- idempotency check below MUST be watertight before this goes live. Same pattern as
-    -- xm.Customer_Propose above, replace dbo.Expense with your real table. @SuggestedAmount is
+    -- xm.MobileGateway_Customer_Propose above, replace dbo.Expense with your real table. @SuggestedAmount is
     -- advisory only — apply your own approval policy, do not just accept it.
     DECLARE @ExistingId nvarchar(64);
     SELECT @ExistingId = CAST(e.Id AS nvarchar(64))
@@ -938,7 +950,7 @@ BEGIN
     END
 
     -- TODO: insert the expense into your real table, in PENDING/whatever your initial approval
-    -- state is. xm.ExpenseReceipt_Push calls follow immediately after for each attached receipt.
+    -- state is. xm.MobileGateway_ExpenseReceipt_Push calls follow immediately after for each attached receipt.
     DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
 
     SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
@@ -950,7 +962,7 @@ GO
    Either @Url (we host it and you fetch it) or @ContentBase64 (you store the bytes) will be
    supplied, never both. Tell us which you want — URL keeps the payloads small, but needs
    XInfo to be able to reach our object store. */
-CREATE OR ALTER PROCEDURE xm.ExpenseReceipt_Push
+CREATE OR ALTER PROCEDURE xm.MobileGateway_ExpenseReceipt_Push
     @ExpenseId       uniqueidentifier,
     @XinfoExpenseId  nvarchar(64)  = NULL,
     @AttachmentId    uniqueidentifier,
@@ -964,7 +976,7 @@ BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] Replace dbo.ExpenseReceipt with your real table. Unlike the other push
     -- procedures, the gateway does not read a result row from this one (it "rides" the parent
-    -- xm.Expense_Push call — see SqlPushRepository.PushExpenseAsync) and it has no
+    -- xm.MobileGateway_Expense_Push call — see SqlPushRepository.PushExpenseAsync) and it has no
     -- @IdempotencyKey of its own; de-duplicate on @AttachmentId if this can be called twice.
     -- Exactly one of @Url / @ContentBase64 will be supplied, never both.
     IF NOT EXISTS (SELECT 1 FROM dbo.ExpenseReceipt WHERE AttachmentId = @AttachmentId)
@@ -979,7 +991,7 @@ GO
 /* One row per rep per day: where they went, how far, how long at customers.
    Derived from tracking and pushed nightly. @AttendanceStatus is informational — XMobile is
    explicitly NOT the attendance system of record, so please do not pay anyone from it. */
-CREATE OR ALTER PROCEDURE xm.JourneySummary_Push
+CREATE OR ALTER PROCEDURE xm.MobileGateway_JourneySummary_Push
     @MessageId            uniqueidentifier,
     @IdempotencyKey       nvarchar(200),
     @OccurredAt           datetimeoffset,
@@ -1001,7 +1013,7 @@ CREATE OR ALTER PROCEDURE xm.JourneySummary_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.Customer_Propose above. Replace
+    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
     -- dbo.JourneySummary with your real table. @AttendanceStatus is informational only — XMobile
     -- is explicitly not the attendance system of record, please do not pay anyone from it.
     DECLARE @ExistingId nvarchar(64);
@@ -1035,7 +1047,7 @@ GO
    RESULT SET 2: a single nvarchar(200) column of ExternalRefs (the IdempotencyKeys held)
 
    @Entity is one of: expense, visit, tour, opportunity, journey_summary. */
-CREATE OR ALTER PROCEDURE xm.Reconciliation_GetSummary
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Reconciliation_GetSummary
     @Entity       nvarchar(30),
     @FromDate     datetimeoffset,
     @ToDate       datetimeoffset,
@@ -1065,7 +1077,7 @@ GO
 
 /* Liveness. Returns a single column with the value 1. Used by the gateway's readiness probe
    so a half-deployed release is caught before traffic reaches it. */
-CREATE OR ALTER PROCEDURE xm.Health_Check
+CREATE OR ALTER PROCEDURE xm.MobileGateway_Health_Check
 AS
 BEGIN
     SET NOCOUNT ON;

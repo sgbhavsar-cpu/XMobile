@@ -72,7 +72,7 @@ These are in [docs/12 §9](../../docs/12-xinfo-gateway.md#9-what-we-need-from-th
 but the short version:
 
 - Can we have a **dev instance** to point at, even with the stubs unimplemented?
-- Does XInfo store **site coordinates**? If not we skip `xm.Site_CaptureGeo`.
+- Does XInfo store **site coordinates**? If not we skip `xm.MobileGateway_Site_CaptureGeo`.
 - Does XInfo hold **mileage / per-diem rates**? If not we keep them on our side.
 - **Receipts**: do you want a URL to fetch, or the bytes inline?
 - How does a **rejected prospect** get back to us — through `Customers_GetChanged` with

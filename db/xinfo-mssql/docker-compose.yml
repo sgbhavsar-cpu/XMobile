@@ -1,0 +1,33 @@
+# Local SQL Server instance for XInfo gateway development.
+#
+# This is NOT XInfo itself — it's a throwaway dev server so you can restore a copy of an
+# XInfo/XStudio database backup locally, poke at the real schema, and adapt the
+# [XInfo-DBA-TODO] skeletons in 01_procedures.sql against real tables instead of guessing.
+#
+# Start:   docker compose -f db/xinfo-mssql/docker-compose.yml up -d
+# Connect: sqlcmd -S 127.0.0.1,14340 -U sa -P "XMobile_Docker_Dev_2026!" -C
+# Stop:    docker compose -f db/xinfo-mssql/docker-compose.yml down          (keeps the volume)
+# Wipe:    docker compose -f db/xinfo-mssql/docker-compose.yml down -v      (drops restored data too)
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: xmobile-xinfo-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "XMobile_Docker_Dev_2026!"
+    ports:
+      - "127.0.0.1:14340:1433"
+    volumes:
+      - xmobile_xinfo_mssql_data:/var/opt/mssql
+      # Read-only: source .bak files for local restores, never written to by the container.
+      - ../../XInfoDB:/var/opt/mssql/backup:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 15
+
+volumes:
+  xmobile_xinfo_mssql_data:

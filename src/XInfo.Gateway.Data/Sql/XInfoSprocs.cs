@@ -7,49 +7,51 @@ namespace XInfo.Gateway.Data.Sql;
 /// <c>db/xinfo-mssql/</c> and fails the build when they disagree, so a procedure renamed on
 /// either side is caught here rather than in an environment.
 ///
-/// Naming: <c>xm.[Subject]_[Verb]</c>. The <c>xm</c> schema keeps everything XMobile depends
-/// on in one place inside XInfo's database, so their team can see the whole surface at a
-/// glance and grant rights to exactly it.
+/// Naming: <c>xm.MobileGateway_[Subject]_[Verb]</c>. The <c>xm</c> schema keeps everything
+/// XMobile depends on in one place inside XInfo's database, so their team can see the whole
+/// surface at a glance and grant rights to exactly it; the <c>MobileGateway_</c> prefix makes
+/// every one of these procedures instantly recognizable (and greppable) once it's ported into
+/// XInfo's live database alongside their own procedures.
 /// </summary>
 public static class XInfoSprocs
 {
     // ---------------------------------------------------------------- pull: master data
-    public const string CustomersGetChanged = "xm.Customers_GetChanged";
-    public const string SitesGetChanged = "xm.Sites_GetChanged";
-    public const string ContactsGetChanged = "xm.Contacts_GetChanged";
-    public const string AssignmentsGetChanged = "xm.Assignments_GetChanged";
-    public const string UsersGetChanged = "xm.Users_GetChanged";
-    public const string OrgUnitsGetChanged = "xm.OrgUnits_GetChanged";
+    public const string CustomersGetChanged = "xm.MobileGateway_Customers_GetChanged";
+    public const string SitesGetChanged = "xm.MobileGateway_Sites_GetChanged";
+    public const string ContactsGetChanged = "xm.MobileGateway_Contacts_GetChanged";
+    public const string AssignmentsGetChanged = "xm.MobileGateway_Assignments_GetChanged";
+    public const string UsersGetChanged = "xm.MobileGateway_Users_GetChanged";
+    public const string OrgUnitsGetChanged = "xm.MobileGateway_OrgUnits_GetChanged";
 
     /// <summary>Targeted refresh for the ids a webhook told us about.</summary>
-    public const string CustomersGetByIds = "xm.Customers_GetByIds";
+    public const string CustomersGetByIds = "xm.MobileGateway_Customers_GetByIds";
 
     // ---------------------------------------------------------------- pull: transactions
-    public const string SalesHistoryGetChanged = "xm.SalesHistory_GetChanged";
-    public const string OpportunitiesGetChanged = "xm.Opportunities_GetChanged";
-    public const string ExpenseStatusGetChanged = "xm.ExpenseStatus_GetChanged";
+    public const string SalesHistoryGetChanged = "xm.MobileGateway_SalesHistory_GetChanged";
+    public const string OpportunitiesGetChanged = "xm.MobileGateway_Opportunities_GetChanged";
+    public const string ExpenseStatusGetChanged = "xm.MobileGateway_ExpenseStatus_GetChanged";
 
     // ---------------------------------------------------------------- pull: reference
-    public const string ReferenceGetItems = "xm.Reference_GetItems";
-    public const string RatesGetCurrent = "xm.Rates_GetCurrent";
+    public const string ReferenceGetItems = "xm.MobileGateway_Reference_GetItems";
+    public const string RatesGetCurrent = "xm.MobileGateway_Rates_GetCurrent";
 
     // ---------------------------------------------------------------- push: field-created records
-    public const string CustomerPropose = "xm.Customer_Propose";
-    public const string SiteAdd = "xm.Site_Add";
-    public const string ContactAdd = "xm.Contact_Add";
-    public const string SiteCaptureGeo = "xm.Site_CaptureGeo";
+    public const string CustomerPropose = "xm.MobileGateway_Customer_Propose";
+    public const string SiteAdd = "xm.MobileGateway_Site_Add";
+    public const string ContactAdd = "xm.MobileGateway_Contact_Add";
+    public const string SiteCaptureGeo = "xm.MobileGateway_Site_CaptureGeo";
 
     // ---------------------------------------------------------------- push: field activity
-    public const string OpportunityUpsert = "xm.Opportunity_Upsert";
-    public const string VisitPush = "xm.Visit_Push";
-    public const string TourPush = "xm.Tour_Push";
-    public const string ExpensePush = "xm.Expense_Push";
-    public const string ExpenseReceiptPush = "xm.ExpenseReceipt_Push";
-    public const string JourneySummaryPush = "xm.JourneySummary_Push";
+    public const string OpportunityUpsert = "xm.MobileGateway_Opportunity_Upsert";
+    public const string VisitPush = "xm.MobileGateway_Visit_Push";
+    public const string TourPush = "xm.MobileGateway_Tour_Push";
+    public const string ExpensePush = "xm.MobileGateway_Expense_Push";
+    public const string ExpenseReceiptPush = "xm.MobileGateway_ExpenseReceipt_Push";
+    public const string JourneySummaryPush = "xm.MobileGateway_JourneySummary_Push";
 
     // ---------------------------------------------------------------- reconciliation & health
-    public const string ReconciliationGetSummary = "xm.Reconciliation_GetSummary";
-    public const string HealthCheck = "xm.Health_Check";
+    public const string ReconciliationGetSummary = "xm.MobileGateway_Reconciliation_GetSummary";
+    public const string HealthCheck = "xm.MobileGateway_Health_Check";
 
     /// <summary>
     /// Every name above. Used by the drift test, and by the readiness probe that verifies the
