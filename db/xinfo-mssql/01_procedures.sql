@@ -813,12 +813,16 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Site_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
-    -- dbo.CustomerSite with your real table.
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose (see its comment for the
+    -- shared dbo.GatewayIdempotencyLedger design). @AddressLine1/@City/@State/@PostalCode are
+    -- accepted (required by the shared push contract shape) but NOT persisted —
+    -- dbo.AccountPremises has no address columns of its own (see
+    -- xm.MobileGateway_Sites_GetChanged's comment: address always comes from the parent
+    -- Account, which this procedure must not overwrite since a second site's address may
+    -- differ from the account's own). AccountPremisesTypeID defaults to 'Head Office' as in
+    -- Customer_Propose — this procedure's payload has no @SiteType to resolve a real type from.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(s.Id AS nvarchar(64))
-    FROM dbo.CustomerSite AS s
-    WHERE s.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -827,10 +831,33 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the new site into your real table.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    IF NOT EXISTS (SELECT 1 FROM dbo.Accounts WHERE ID = @CustomerXinfoId)
+    BEGIN
+        THROW 50004, 'CustomerXinfoId does not exist', 1;
+    END
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    DECLARE @NewSiteId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @DefaultPremisesTypeId nvarchar(64) = '653841DE-44E4-4989-9429-73FE54A81869'; -- 'Head Office'
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.AccountPremises (ID, Name, AccountID, AccountPremisesTypeID, Latitude,
+            Longitude, DefaultRecord, IsDeleted, Source, CreatedOn, ModifiedOn)
+        VALUES (@NewSiteId, @Name, @CustomerXinfoId, @DefaultPremisesTypeId, @Lat, @Lon,
+            0, 0, 'XMobile', @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'site', @NewSiteId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewSiteId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
@@ -850,12 +877,11 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Contact_Add
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
-    -- dbo.CustomerContact with your real table.
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose (see its comment for the
+    -- shared dbo.GatewayIdempotencyLedger design). Clean 1:1 mapping onto
+    -- dbo.AccountContactDetails — same table/columns Contacts_GetChanged reads on the pull side.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(k.Id AS nvarchar(64))
-    FROM dbo.CustomerContact AS k
-    WHERE k.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -864,10 +890,32 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the new contact into your real table.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    IF NOT EXISTS (SELECT 1 FROM dbo.Accounts WHERE ID = @CustomerXinfoId)
+    BEGIN
+        THROW 50004, 'CustomerXinfoId does not exist', 1;
+    END
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    DECLARE @NewContactId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.AccountContactDetails (ID, ContactPersonname, Designation, ConatctNumber,
+            ConatctEmailid, AccountId, IsLeft, IsDeleted, Source, CreatedOn, ModifiedOn)
+        VALUES (@NewContactId, @FullName, @Designation, @Phone, @Email, @CustomerXinfoId,
+            0, 0, 'XMobile', @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'contact', @NewContactId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewContactId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
@@ -890,18 +938,54 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Site_CaptureGeo
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. This one updates
-    -- an existing site's coordinates rather than inserting a new row — replace dbo.CustomerSite
-    -- with your real table, and decide whether a field-captured Lat/Lon should ever be
-    -- overwritten by a later geocode (it generally shouldn't — see the remark above).
-    IF EXISTS (SELECT 1 FROM dbo.CustomerSite AS s WHERE s.SourceIdempotencyKey = @IdempotencyKey)
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose. @SiteXinfoId can point at
+    -- either a real dbo.AccountPremises row OR a synthesized site (whose XinfoId is the
+    -- account's own id — see xm.MobileGateway_Sites_GetChanged's hybrid design), so this
+    -- updates whichever one actually matches rather than assuming AccountPremises.
+    DECLARE @ExistingId nvarchar(64);
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingId IS NOT NULL
     BEGIN
-        SELECT Accepted = CAST(1 AS bit), XinfoId = @SiteXinfoId,
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
                WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
         RETURN;
     END
 
-    -- TODO: UPDATE dbo.CustomerSite SET Lat = @Lat, Lon = @Lon, ... WHERE Id = @SiteXinfoId;
+    IF @SiteXinfoId IS NULL
+    BEGIN
+        THROW 50001, 'SiteXinfoId is required', 1;
+    END
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS (SELECT 1 FROM dbo.AccountPremises WHERE ID = @SiteXinfoId)
+        BEGIN
+            UPDATE dbo.AccountPremises
+            SET Latitude = @Lat, Longitude = @Lon, ModifiedOn = @OccurredAt
+            WHERE ID = @SiteXinfoId;
+        END
+        ELSE IF EXISTS (SELECT 1 FROM dbo.Accounts WHERE ID = @SiteXinfoId)
+        BEGIN
+            UPDATE dbo.Accounts
+            SET Latitude = @Lat, Longitude = @Lon, ModifiedOn = @OccurredAt
+            WHERE ID = @SiteXinfoId;
+        END
+        ELSE
+        BEGIN
+            THROW 50004, 'SiteXinfoId does not exist', 1;
+        END
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'site_geo', @SiteXinfoId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
 
     SELECT Accepted = CAST(1 AS bit), XinfoId = @SiteXinfoId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
