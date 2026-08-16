@@ -297,26 +297,31 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Assignments_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.CustomerAssignment with your real table. The gateway's paging
-    -- id for this procedure is the composite "CustomerXinfoId|EmployeeCode" (see
-    -- PullRepository.GetAssignmentsAsync) — keep the CONCAT(...) expression below exactly as the
-    -- id used in both the WHERE and ORDER BY clauses.
+    -- XInfo has no real assignment-history concept: no roles, no validity date ranges, only
+    -- one AssignedUserID per account (same field xm.MobileGateway_Customers_GetChanged reads
+    -- for OwnerEmployeeCode). Every account with a resolvable owner gets one synthesized
+    -- Role='PRIMARY' row here; accounts with no owner get none. ValidFrom uses the account's
+    -- own CreatedOn as the best available proxy for "since when".
+    -- KNOWN GAP vs. the contract note above: because this is derived from current state, a
+    -- reassignment away from a rep does not surface as a row with ValidTo set — the old row
+    -- just stops being returned. XInfo has no data to detect or backfill that transition.
     SELECT TOP (@PageSize)
-        CustomerXinfoId = CAST(a.CustomerId AS nvarchar(64)),
-        EmployeeCode    = a.EmployeeCode,
-        Role            = a.Role,
-        ValidFrom       = a.ValidFrom,
-        ValidTo         = a.ValidTo,
-        ModifiedAt      = a.ModifiedAt
-    FROM dbo.CustomerAssignment AS a
-    WHERE (@ModifiedSince IS NULL OR a.ModifiedAt >= @ModifiedSince)
+        CustomerXinfoId = a.ID,
+        EmployeeCode    = u.Name,
+        Role            = 'PRIMARY',
+        ValidFrom       = TODATETIMEOFFSET(a.CreatedOn, '+05:30'),
+        ValidTo         = CAST(NULL AS datetimeoffset),
+        ModifiedAt      = TODATETIMEOFFSET(a.ModifiedOn, '+05:30')
+    FROM dbo.Accounts a
+    INNER JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u ON u.ID = a.AssignedUserID
+    WHERE (@ModifiedSince IS NULL OR a.ModifiedOn >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR a.ModifiedAt > @AfterModifiedAt
-            OR (a.ModifiedAt = @AfterModifiedAt
-                AND CONCAT(CAST(a.CustomerId AS nvarchar(64)), '|', a.EmployeeCode) > @AfterId)
+            OR a.ModifiedOn > @AfterModifiedAt
+            OR (a.ModifiedOn = @AfterModifiedAt
+                AND CONCAT(a.ID, '|', u.Name) > @AfterId)
           )
-    ORDER BY a.ModifiedAt, CONCAT(CAST(a.CustomerId AS nvarchar(64)), '|', a.EmployeeCode);
+    ORDER BY a.ModifiedOn, CONCAT(a.ID, '|', u.Name);
 END
 GO
 
