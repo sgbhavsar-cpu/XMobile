@@ -496,35 +496,56 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Opportunities_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.Opportunity with your real table.
+    -- Sourced from dbo.Opportunities (36,991 rows, ~190 columns — a full ERP-grade pipeline,
+    -- far richer than this contract needs). Several fields have no clean source and are
+    -- documented rather than guessed:
+    --   * SiteXinfoId / ContactXinfoId: no link columns exist on this table at all.
+    --   * StageCode uses o.Status (99.97% populated, clean values like "Proposal",
+    --     "Negotiation", "CloseWonApproved") — NOT o.OppStage, which despite the name is
+    --     99.1% empty. ProbabilityPct DOES come from OppStage (via a join to
+    --     dbo.OpportunityCloseProbabilities' numeric Percentage column) since that's the only
+    --     real numeric probability source — so it is NULL far more often than StageCode.
+    --   * Currency resolves via dbo.Currencies for the 16% of rows with Currencyid set
+    --     (defaults to 'INR' otherwise); the lookup itself has messy data (a deleted "rupee"
+    --     row, test rows) so this is a best-effort truncation, not a clean ISO code.
+    --   * Source and Competitor: no source column for either (LeadSourceID exists but is
+    --     100% unpopulated) — always NULL.
+    --   * XmobileId: XInfo's schema has NO column to store XMobile's own opportunity id at
+    --     all. This isn't just unpopulated today — round-tripping it requires the DBA to add a
+    --     column (or a side-mapping table) before xm.MobileGateway_Opportunity_Upsert can
+    --     write it back. Flagging now since the push side will hit this directly.
     SELECT TOP (@PageSize)
-        XinfoId            = CAST(o.Id AS nvarchar(64)),
-        CustomerXinfoId    = CAST(o.CustomerId AS nvarchar(64)),
-        SiteXinfoId        = CAST(o.SiteId AS nvarchar(64)),
-        ContactXinfoId     = CAST(o.ContactId AS nvarchar(64)),
-        Title              = o.Title,
+        XinfoId            = o.ID,
+        CustomerXinfoId    = o.AccountID,
+        SiteXinfoId        = CAST(NULL AS nvarchar(64)),
+        ContactXinfoId     = CAST(NULL AS nvarchar(64)),
+        Title              = o.Name,
         Description        = o.Description,
-        StageCode          = o.StageCode,
-        EstimatedValue     = o.EstimatedValue,
-        Currency           = o.Currency,
-        ProbabilityPct     = o.ProbabilityPct,
-        ExpectedCloseDate  = o.ExpectedCloseDate,
-        OwnerEmployeeCode  = o.OwnerEmployeeCode,
-        Source             = o.Source,
-        Competitor         = o.Competitor,
-        ClosedAt           = o.ClosedAt,
-        CloseReasonCode    = o.CloseReasonCode,
-        ActualValue        = o.ActualValue,
-        XmobileId          = o.XmobileId,
-        ModifiedAt         = o.ModifiedAt
-    FROM dbo.Opportunity AS o
-    WHERE (@ModifiedSince IS NULL OR o.ModifiedAt >= @ModifiedSince)
+        StageCode          = o.Status,
+        EstimatedValue     = o.Amount,
+        Currency           = COALESCE(UPPER(LEFT(NULLIF(cur.Name,''),3)), 'INR'),
+        ProbabilityPct     = CAST(prob.Percentage AS int),
+        ExpectedCloseDate  = TODATETIMEOFFSET(CAST(o.ExpectedcloseDate AS datetime), '+05:30'),
+        OwnerEmployeeCode  = u.Name,
+        Source             = CAST(NULL AS nvarchar(50)),
+        Competitor         = CAST(NULL AS nvarchar(200)),
+        ClosedAt           = TODATETIMEOFFSET(CAST(COALESCE(o.CloseWonApprovedDate, o.CloseLostDate) AS datetime), '+05:30'),
+        CloseReasonCode    = o.RequestForCloseLostReason,
+        ActualValue        = o.OrderAmount,
+        XmobileId          = CAST(NULL AS uniqueidentifier),
+        ModifiedAt         = TODATETIMEOFFSET(o.ModifiedOn, '+05:30')
+    FROM dbo.Opportunities o
+    LEFT JOIN dbo.Currencies cur ON cur.ID = o.Currencyid AND cur.IsDeleted = 0
+    LEFT JOIN dbo.OpportunityCloseProbabilities prob ON prob.ID = o.OppStage
+    LEFT JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u ON u.ID = o.AssignedUserID
+    WHERE o.Name IS NOT NULL AND o.AccountID IS NOT NULL
+      AND (@ModifiedSince IS NULL OR o.ModifiedOn >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR o.ModifiedAt > @AfterModifiedAt
-            OR (o.ModifiedAt = @AfterModifiedAt AND CAST(o.Id AS nvarchar(64)) > @AfterId)
+            OR o.ModifiedOn > @AfterModifiedAt
+            OR (o.ModifiedOn = @AfterModifiedAt AND o.ID > @AfterId)
           )
-    ORDER BY o.ModifiedAt, CAST(o.Id AS nvarchar(64));
+    ORDER BY o.ModifiedOn, o.ID;
 END
 GO
 
