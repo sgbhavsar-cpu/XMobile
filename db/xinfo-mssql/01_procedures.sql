@@ -118,26 +118,30 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Customers_GetByIds
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same columns/table as xm.MobileGateway_Customers_GetChanged above, filtered by id list.
+    -- Same source and field mapping as xm.MobileGateway_Customers_GetChanged above — see its
+    -- comment for why LegalName/Email/CreditStatus are NULL and Industry only partially resolves.
     SELECT
-        XinfoId            = CAST(c.Id AS nvarchar(64)),
-        Name               = c.Name,
-        Code               = c.Code,
-        LegalName          = c.LegalName,
-        AccountType        = c.AccountType,
-        Category           = c.Category,
-        Industry           = c.Industry,
-        ParentXinfoId      = CAST(c.ParentId AS nvarchar(64)),
-        OwnerEmployeeCode  = c.OwnerEmployeeCode,
-        OrgUnitCode        = c.OrgUnitCode,
-        CreditStatus       = c.CreditStatus,
-        GstNumber          = c.GstNumber,
-        Phone              = c.Phone,
-        Email              = c.Email,
-        IsActive           = c.IsActive,
-        ModifiedAt         = c.ModifiedAt
-    FROM dbo.Customer AS c
-    INNER JOIN STRING_SPLIT(@XinfoIds, ',') AS ids ON CAST(c.Id AS nvarchar(64)) = ids.value;
+        XinfoId            = a.ID,
+        Name               = a.Name,
+        Code               = a.Abbreviation,
+        LegalName          = CAST(NULL AS nvarchar(200)),
+        AccountType        = a.AccountType,
+        Category           = a.Businesstype,
+        Industry           = ind.Name,
+        ParentXinfoId      = a.ParentID,
+        OwnerEmployeeCode  = u.Name,
+        OrgUnitCode        = sr.Name,
+        CreditStatus       = CAST(NULL AS nvarchar(50)),
+        GstNumber          = a.GSTRegistrationnumber,
+        Phone              = a.Phone,
+        Email              = CAST(NULL AS nvarchar(200)),
+        IsActive           = CASE WHEN a.IsDeleted = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+        ModifiedAt         = TODATETIMEOFFSET(a.ModifiedOn, '+05:30')
+    FROM dbo.Accounts a
+    INNER JOIN STRING_SPLIT(@XinfoIds, ',') ids ON ids.value = a.ID
+    LEFT JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u ON u.ID = a.AssignedUserID
+    LEFT JOIN dbo.SalesRegion sr ON sr.ID = a.SalesRegionId
+    LEFT JOIN dbo.Industry ind ON ind.ID = a.Industry;
 END
 GO
 
