@@ -340,26 +340,45 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Users_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.SalesRep with your real table. Paging id is EmployeeCode.
+    -- EmployeeCode/identity lives in XStudio_Configuration (cross-database, same as
+    -- OwnerEmployeeCode in Customers_GetChanged), not in this database — its Name column
+    -- (a login username, e.g. "hemangini.patel") is EmployeeCode. This table has no
+    -- Grade/Designation/OrgUnitCode of its own; those come from a *separate*, mostly-unlinked
+    -- HR table (dbo.Employees) via an email match (CompanyEmailId or PersonalEmailid = EmailID)
+    -- that only resolves for ~46% of users — Designation/Department/Grade come back NULL for
+    -- the rest, which is a real coverage gap, not a query bug. Also note: this table holds
+    -- every XStudio login, including the vendor's own internal staff, not only field sales
+    -- reps — there is no flag to separate them, so all are returned; harmless for XMobile since
+    -- it only needs to resolve whichever EmployeeCode values show up elsewhere (e.g. as
+    -- OwnerEmployeeCode). FullName falls back through FirstName+LastName to the login name
+    -- itself since the column is often blank; ModifiedAt falls back to CreatedOn (194 rows,
+    -- 5.6%, have no ModifiedOn). ManagerEmployeeCode is populated for only 10 of 3,458 rows —
+    -- almost nobody has a manager recorded here — but resolves correctly when present.
     SELECT TOP (@PageSize)
-        EmployeeCode         = u.EmployeeCode,
-        FullName             = u.FullName,
-        Email                = u.Email,
-        Phone                = u.Phone,
-        Grade                = u.Grade,
-        Designation          = u.Designation,
-        OrgUnitCode          = u.OrgUnitCode,
-        ManagerEmployeeCode  = u.ManagerEmployeeCode,
-        IsActive             = u.IsActive,
-        ModifiedAt           = u.ModifiedAt
-    FROM dbo.SalesRep AS u
-    WHERE (@ModifiedSince IS NULL OR u.ModifiedAt >= @ModifiedSince)
+        EmployeeCode         = u.Name,
+        FullName             = COALESCE(NULLIF(u.FullName,''), NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName,' ',u.LastName))),''), u.Name),
+        Email                = u.EmailID,
+        Phone                = u.ContactNo,
+        Grade                = bl.Name,
+        Designation          = des.Name,
+        OrgUnitCode          = dept.Name,
+        ManagerEmployeeCode  = mgr.Name,
+        IsActive             = CASE WHEN u.IsDeleted = 1 OR ISNULL(u.IsActive,0) = 0 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+        ModifiedAt           = TODATETIMEOFFSET(COALESCE(u.ModifiedOn, u.CreatedOn), '+05:30')
+    FROM XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u
+    LEFT JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl mgr ON mgr.ID = u.ManagerID
+    LEFT JOIN dbo.Employees e ON e.CompanyEmailId = u.EmailID OR e.PersonalEmailid = u.EmailID
+    LEFT JOIN dbo.Designations des ON des.ID = e.DesignationId
+    LEFT JOIN dbo.Departments dept ON dept.ID = e.DepartmentID
+    LEFT JOIN dbo.BandLevels bl ON bl.ID = e.BandLevelID
+    WHERE u.Name IS NOT NULL
+      AND (@ModifiedSince IS NULL OR COALESCE(u.ModifiedOn, u.CreatedOn) >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR u.ModifiedAt > @AfterModifiedAt
-            OR (u.ModifiedAt = @AfterModifiedAt AND u.EmployeeCode > @AfterId)
+            OR COALESCE(u.ModifiedOn, u.CreatedOn) > @AfterModifiedAt
+            OR (COALESCE(u.ModifiedOn, u.CreatedOn) = @AfterModifiedAt AND u.Name > @AfterId)
           )
-    ORDER BY u.ModifiedAt, u.EmployeeCode;
+    ORDER BY COALESCE(u.ModifiedOn, u.CreatedOn), u.Name;
 END
 GO
 
