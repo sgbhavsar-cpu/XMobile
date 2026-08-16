@@ -164,34 +164,78 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Sites_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.CustomerSite with your real table.
-    SELECT TOP (@PageSize)
-        XinfoId          = CAST(s.Id AS nvarchar(64)),
-        CustomerXinfoId  = CAST(s.CustomerId AS nvarchar(64)),
-        Name             = s.Name,
-        SiteCode         = s.SiteCode,
-        SiteType         = s.SiteType,
-        IsPrimary        = s.IsPrimary,
-        AddressLine1     = s.AddressLine1,
-        AddressLine2     = s.AddressLine2,
-        Landmark         = s.Landmark,
-        City             = s.City,
-        District         = s.District,
-        State            = s.State,
-        PostalCode       = s.PostalCode,
-        CountryCode      = s.CountryCode,
-        Lat              = s.Lat,
-        Lon              = s.Lon,
-        IsActive         = s.IsActive,
-        ModifiedAt       = s.ModifiedAt
-    FROM dbo.CustomerSite AS s
-    WHERE (@ModifiedSince IS NULL OR s.ModifiedAt >= @ModifiedSince)
+    -- dbo.AccountPremises ("sites" as a distinct sub-location) covers only 34 of 9,804
+    -- accounts and has no address fields of its own — Accounts carries the real address data
+    -- instead. So this UNIONs two legs: real AccountPremises rows (address/postal inherited
+    -- from the parent Account, since premises tracks none itself) plus a synthesized "primary
+    -- site" per account that has no real premises row, built from that account's own billing
+    -- address/geo. Every customer ends up with at least one site to check in against, matching
+    -- what XMobile's visit flow assumes. The synthesized leg reuses the account's own id as
+    -- XinfoId — deterministic and stable across pulls; Sites and Customers are independent
+    -- id-spaces in XMobile so this does not collide with anything.
+    -- CountryCode is always NULL: the source stores a free-text country name (via a lookup
+    -- table), not an ISO-2 code, and there is no mapping available.
+    ;WITH Sites AS (
+        SELECT
+            XinfoId         = p.ID,
+            CustomerXinfoId = p.AccountID,
+            Name            = p.Name,
+            SiteCode        = CAST(NULL AS nvarchar(50)),
+            SiteType        = pt.Name,
+            IsPrimary       = CASE WHEN p.DefaultRecord = 1 THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END,
+            AddressLine1    = a.Billingaddress,
+            AddressLine2    = CAST(NULL AS nvarchar(200)),
+            Landmark        = CAST(NULL AS nvarchar(200)),
+            City            = ci.Name,
+            District        = CAST(NULL AS nvarchar(100)),
+            State           = st.Name,
+            PostalCode      = a.BillingaddressPostalcode,
+            CountryCode     = CAST(NULL AS char(2)),
+            Lat             = p.Latitude,
+            Lon             = p.Longitude,
+            IsActive        = CASE WHEN p.IsDeleted = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+            ModifiedAt      = TODATETIMEOFFSET(p.ModifiedOn, '+05:30')
+        FROM dbo.AccountPremises p
+        INNER JOIN dbo.Accounts a ON a.ID = p.AccountID
+        LEFT JOIN dbo.AccountPremisesTypes pt ON pt.ID = p.AccountPremisesTypeID
+        LEFT JOIN dbo.Cities ci ON ci.ID = a.BillingaddressCity
+        LEFT JOIN dbo.States st ON st.ID = a.BillingaddressState
+
+        UNION ALL
+
+        SELECT
+            XinfoId         = a.ID,
+            CustomerXinfoId = a.ID,
+            Name            = a.Name,
+            SiteCode        = CAST(NULL AS nvarchar(50)),
+            SiteType        = CAST(NULL AS nvarchar(50)),
+            IsPrimary       = CAST(1 AS bit),
+            AddressLine1    = a.Billingaddress,
+            AddressLine2    = CAST(NULL AS nvarchar(200)),
+            Landmark        = CAST(NULL AS nvarchar(200)),
+            City            = ci.Name,
+            District        = CAST(NULL AS nvarchar(100)),
+            State           = st.Name,
+            PostalCode      = a.BillingaddressPostalcode,
+            CountryCode     = CAST(NULL AS char(2)),
+            Lat             = a.Latitude,
+            Lon             = a.Longitude,
+            IsActive        = CASE WHEN a.IsDeleted = 1 THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,
+            ModifiedAt      = TODATETIMEOFFSET(a.ModifiedOn, '+05:30')
+        FROM dbo.Accounts a
+        LEFT JOIN dbo.Cities ci ON ci.ID = a.BillingaddressCity
+        LEFT JOIN dbo.States st ON st.ID = a.BillingaddressState
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.AccountPremises p2 WHERE p2.AccountID = a.ID AND p2.IsDeleted = 0)
+    )
+    SELECT TOP (@PageSize) *
+    FROM Sites
+    WHERE (@ModifiedSince IS NULL OR ModifiedAt >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR s.ModifiedAt > @AfterModifiedAt
-            OR (s.ModifiedAt = @AfterModifiedAt AND CAST(s.Id AS nvarchar(64)) > @AfterId)
+            OR ModifiedAt > @AfterModifiedAt
+            OR (ModifiedAt = @AfterModifiedAt AND XinfoId > @AfterId)
           )
-    ORDER BY s.ModifiedAt, CAST(s.Id AS nvarchar(64));
+    ORDER BY ModifiedAt, XinfoId;
 END
 GO
 
