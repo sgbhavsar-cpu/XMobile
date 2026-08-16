@@ -721,13 +721,28 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Customer_Propose
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] The idempotency check/insert shape below is the pattern every push
-    -- procedure in this file follows — replace dbo.Customer (and wherever you keep the
-    -- idempotency key: a column here, or a separate ledger table) with your real design.
+    -- Idempotency uses a new shared table, dbo.GatewayIdempotencyLedger (IdempotencyKey PK,
+    -- Entity, XinfoId, EmployeeCode, Amount, CreatedAt) — no XInfo table has a column to hold
+    -- an external key, so every push procedure in this file checks/inserts into this one
+    -- ledger rather than duplicating that gap nine times. xm.MobileGateway_Reconciliation_GetSummary
+    -- reads the same table. @Email (account-level) is not persisted — dbo.Accounts has no email
+    -- column, the same gap Customers_GetChanged.Email hits on the pull side; if @ContactName is
+    -- given, @ContactEmail lands on the new contact instead. @City/@State are resolved against
+    -- dbo.Cities/dbo.States by exact name match (both are GUID lookups on Accounts, not free
+    -- text) and left unset if no match is found rather than guessing. Status is left NULL
+    -- (unapproved) — real data only ever shows Status='Approved' or unset, with no observed
+    -- "pending" value, so NULL is the closest fit. AccountPremisesTypeID is NOT NULL on
+    -- dbo.AccountPremises with no natural default from the push payload, so a newly-proposed
+    -- site defaults to the 'Head Office' type since it's the prospect's first recorded location.
+    --
+    -- NOTE FOR PRODUCTION: dbo.Accounts/AccountPremises/AccountContactDetails each carry
+    -- XStudio_TRG_* triggers (audit logging, cross-database sync flags, approval-workflow
+    -- mail/SMS notifications) that this dev environment can't fully exercise — one trigger
+    -- chain depends on a SugarCRM_Data database not included in this restore. Disabled here for
+    -- testing only; this is pre-existing platform behavior the procedure below does not need to
+    -- replicate, but it WILL fire in production and should stay enabled there.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(c.Id AS nvarchar(64))
-    FROM dbo.Customer AS c
-    WHERE c.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -736,11 +751,45 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the prospect (unapproved account) + site + optional contact into your real
-    -- tables here, inside a transaction. Hold it wherever XInfo keeps accounts pending approval.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @NewAccountId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @CityId nvarchar(64) = (SELECT TOP 1 ID FROM dbo.Cities WHERE Name = @City AND IsDeleted = 0);
+    DECLARE @StateId nvarchar(64) = (SELECT TOP 1 ID FROM dbo.States WHERE Name = @State AND IsDeleted = 0);
+    DECLARE @DefaultPremisesTypeId nvarchar(64) = '653841DE-44E4-4989-9429-73FE54A81869'; -- 'Head Office'
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.Accounts (ID, Name, AccountType, Phone, GSTRegistrationnumber,
+            Billingaddress, BillingaddressCity, BillingaddressState, BillingaddressPostalcode,
+            Latitude, Longitude, Status, IsDeleted, Source, CreatedOn, ModifiedOn)
+        VALUES (@NewAccountId, @Name, COALESCE(@AccountType, 'Customer'), @Phone, @GstNumber,
+            @AddressLine1, @CityId, @StateId, @PostalCode,
+            @Lat, @Lon, NULL, 0, 'XMobile', @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.AccountPremises (ID, Name, AccountID, AccountPremisesTypeID, Latitude,
+            Longitude, DefaultRecord, IsDeleted, Source, CreatedOn, ModifiedOn)
+        VALUES (CAST(NEWID() AS nvarchar(64)), @SiteName, @NewAccountId, @DefaultPremisesTypeId,
+            @Lat, @Lon, 1, 0, 'XMobile', @OccurredAt, @OccurredAt);
+
+        IF @ContactName IS NOT NULL
+        BEGIN
+            INSERT INTO dbo.AccountContactDetails (ID, ContactPersonname, Designation, ConatctNumber,
+                ConatctEmailid, AccountId, IsLeft, IsDeleted, Source, CreatedOn, ModifiedOn)
+            VALUES (CAST(NEWID() AS nvarchar(64)), @ContactName, @ContactDesignation, @ContactPhone,
+                @ContactEmail, @NewAccountId, 0, 0, 'XMobile', @OccurredAt, @OccurredAt);
+        END
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'customer', @NewAccountId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewAccountId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
