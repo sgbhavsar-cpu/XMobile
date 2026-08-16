@@ -568,33 +568,36 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_ExpenseStatus_GetChanged
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.ExpenseApproval with your real table. ExternalRef must be the
-    -- @IdempotencyKey XMobile sent on the original xm.MobileGateway_Expense_Push call — that is the join key.
-    --
-    -- RESEARCH NOTE (left as a skeleton deliberately, not implemented): dbo.VoucherClaim
-    -- (73,302 rows) is XInfo's real expense/T&E table — Status, PaidDate, ApproveAmount,
-    -- NetClaimAmount map cleanly onto Status/SettledOn/SettledAmount. But it has NO
-    -- IdempotencyKey/ExternalRef-shaped column, and none of its existing rows originated from
-    -- an XMobile push (XMobile has never gone live against this backup). This procedure's join
-    -- key can only exist once xm.MobileGateway_Expense_Push actually writes an XMobile-sourced
-    -- voucher somewhere and stamps the idempotency key onto it — so implement this together
-    -- with that push procedure's design, once it's clear which column/table will hold it.
+    -- Now implementable: xm.MobileGateway_Expense_Push writes Entity='expense' rows into
+    -- dbo.GatewayIdempotencyLedger (IdempotencyKey = this procedure's ExternalRef), which joins
+    -- to dbo.VoucherClaim for the real approval/settlement state. VoucherClaim's real Status
+    -- values (Entered/ExpensesSubmitted/InProgress/ApprovedByFH/ApprovedByManager/Reject/
+    -- Discarded/Cancel/Paid) collapse onto the contract's PENDING/APPROVED/REJECTED/PAID.
+    -- SettledAmount is ApproveAmount (falling back to NetClaimAmount before approval);
+    -- SettledOn only appears once actually Paid.
     SELECT TOP (@PageSize)
-        ExternalRef   = x.ExternalRef,
-        XinfoId       = CAST(x.Id AS nvarchar(64)),
-        Status        = x.Status,
-        Remark        = x.Remark,
-        SettledAmount = x.SettledAmount,
-        SettledOn     = x.SettledOn,
-        ModifiedAt    = x.ModifiedAt
-    FROM dbo.ExpenseApproval AS x
-    WHERE (@ModifiedSince IS NULL OR x.ModifiedAt >= @ModifiedSince)
+        ExternalRef   = l.IdempotencyKey,
+        XinfoId       = l.XinfoId,
+        Status        = CASE
+                             WHEN v.Status = 'Paid' THEN 'PAID'
+                             WHEN v.Status IN ('ApprovedByFH', 'ApprovedByManager') THEN 'APPROVED'
+                             WHEN v.Status IN ('Reject', 'Discarded', 'Cancel') THEN 'REJECTED'
+                             ELSE 'PENDING'
+                         END,
+        Remark        = COALESCE(v.AccountRejectRemarks, v.PMRejectRemarks, v.RMRejectRemarks, v.LastRemarks),
+        SettledAmount = COALESCE(v.ApproveAmount, v.NetClaimAmount),
+        SettledOn     = CASE WHEN v.Status = 'Paid' THEN TODATETIMEOFFSET(v.PaidDate, '+05:30') ELSE NULL END,
+        ModifiedAt    = TODATETIMEOFFSET(v.ModifiedOn, '+05:30')
+    FROM dbo.GatewayIdempotencyLedger l
+    INNER JOIN dbo.VoucherClaim v ON v.ID = l.XinfoId
+    WHERE l.Entity = 'expense'
+      AND (@ModifiedSince IS NULL OR v.ModifiedOn >= @ModifiedSince)
       AND (
             @AfterModifiedAt IS NULL
-            OR x.ModifiedAt > @AfterModifiedAt
-            OR (x.ModifiedAt = @AfterModifiedAt AND x.ExternalRef > @AfterId)
+            OR v.ModifiedOn > @AfterModifiedAt
+            OR (v.ModifiedOn = @AfterModifiedAt AND l.IdempotencyKey > @AfterId)
           )
-    ORDER BY x.ModifiedAt, x.ExternalRef;
+    ORDER BY v.ModifiedOn, l.IdempotencyKey;
 END
 GO
 
