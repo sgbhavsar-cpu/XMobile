@@ -1525,10 +1525,11 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Reconciliation_GetSummary
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.GatewayIdempotencyLedger with wherever you actually store
-    -- each entity's idempotency keys (or union across the real tables per @Entity — e.g.
-    -- dbo.Expense.SourceIdempotencyKey when @Entity = 'expense'). Two result sets are required,
-    -- in this order: (1) one summary row, (2) one row per ExternalRef (the IdempotencyKeys held).
+    -- dbo.GatewayIdempotencyLedger is real (see the design note above
+    -- xm.MobileGateway_Customer_Propose) — every push procedure in this file writes to it, so
+    -- this needed no changes once that table existed. Amount is only ever populated for
+    -- Entity='expense' (the other entities' push procedures don't set it), so TotalAmount comes
+    -- back NULL for every other @Entity value — expected, not a bug.
     SELECT
         RecordCount = COUNT(*),
         TotalAmount = SUM(l.Amount)
