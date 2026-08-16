@@ -568,6 +568,15 @@ BEGIN
     SET NOCOUNT ON;
     -- [XInfo-DBA-TODO] Replace dbo.ExpenseApproval with your real table. ExternalRef must be the
     -- @IdempotencyKey XMobile sent on the original xm.MobileGateway_Expense_Push call — that is the join key.
+    --
+    -- RESEARCH NOTE (left as a skeleton deliberately, not implemented): dbo.VoucherClaim
+    -- (73,302 rows) is XInfo's real expense/T&E table — Status, PaidDate, ApproveAmount,
+    -- NetClaimAmount map cleanly onto Status/SettledOn/SettledAmount. But it has NO
+    -- IdempotencyKey/ExternalRef-shaped column, and none of its existing rows originated from
+    -- an XMobile push (XMobile has never gone live against this backup). This procedure's join
+    -- key can only exist once xm.MobileGateway_Expense_Push actually writes an XMobile-sourced
+    -- voucher somewhere and stamps the idempotency key onto it — so implement this together
+    -- with that push procedure's design, once it's clear which column/table will hold it.
     SELECT TOP (@PageSize)
         ExternalRef   = x.ExternalRef,
         XinfoId       = CAST(x.Id AS nvarchar(64)),
