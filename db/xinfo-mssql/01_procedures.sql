@@ -1315,14 +1315,22 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Expense_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] THE MOST IMPORTANT PROCEDURE IN THIS FILE (see the remark above) — the
-    -- idempotency check below MUST be watertight before this goes live. Same pattern as
-    -- xm.MobileGateway_Customer_Propose above, replace dbo.Expense with your real table. @SuggestedAmount is
-    -- advisory only — apply your own approval policy, do not just accept it.
+    -- THE MOST IMPORTANT PROCEDURE IN THIS FILE — idempotency uses the shared
+    -- dbo.GatewayIdempotencyLedger (Entity='expense'), which is also what
+    -- xm.MobileGateway_ExpenseStatus_GetChanged now reads ExternalRef from, closing that gap.
+    -- dbo.VoucherClaim's grain is "one claim spanning many categories" (12 separate amount
+    -- columns — Travel, Meal, Fuel, etc.) rather than "one single-category line item" like this
+    -- push payload, so @Amount is written into whichever ONE column @CategoryCode maps to
+    -- (defaulting to SundryOther for an unrecognised code) and the rest are left at 0.
+    -- VoucherClaim's amount columns are typed int, not decimal, so @Amount is rounded — a real,
+    -- if minor, fidelity loss the DBA should know about (the ledger keeps the exact decimal for
+    -- reconciliation purposes even though VoucherClaim itself does not). New expenses start
+    -- life at Status='Entered' (submitted, awaiting approval — the natural match for the
+    -- contract's PENDING). @SuggestedAmount is intentionally not applied to
+    -- TotalAmount/NetClaimAmount — only @Amount is, per the remark above about it being
+    -- advisory only.
     DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(e.Id AS nvarchar(64))
-    FROM dbo.Expense AS e
-    WHERE e.SourceIdempotencyKey = @IdempotencyKey;
+    SELECT @ExistingId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
     IF @ExistingId IS NOT NULL
     BEGIN
@@ -1331,11 +1339,47 @@ BEGIN
         RETURN;
     END
 
-    -- TODO: insert the expense into your real table, in PENDING/whatever your initial approval
-    -- state is. xm.MobileGateway_ExpenseReceipt_Push calls follow immediately after for each attached receipt.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @NewExpenseId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @IntAmount int = CAST(ROUND(@Amount, 0) AS int);
+    DECLARE @ExpDate date = CAST(@ExpenseDate AS date);
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        INSERT INTO dbo.VoucherClaim (ID, Description, EmployeeUsername, VoucherStartDate,
+            VoucherEndDate, TravelStartDate, TravelEndDate, TotalAmount, NetClaimAmount,
+            TotalPayableAmount, Status, ExpenseType, VisitID, IsSettlement, IsDeleted, Source,
+            CreatedOn, ModifiedOn,
+            Travel, Meal, Fuel, LodgingHotelExpenses, Mobile, Laundary, OfficeExpense,
+            PostageCourier, StationaryPrinting, SundryOther, ConveyanceExpenses, CashPurchase)
+        VALUES (@NewExpenseId, @Description, @EmployeeCode, @ExpDate,
+            @ExpDate, @ExpDate, @ExpDate, @IntAmount, @IntAmount,
+            @IntAmount, 'Entered', 'Sales', CAST(@VisitId AS nvarchar(64)), 0, 0, 'XMobile',
+            @OccurredAt, @OccurredAt,
+            CASE WHEN @CategoryCode = 'TRAVEL' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'MEAL' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'FUEL' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'LODGING' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'MOBILE' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'LAUNDRY' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'OFFICE' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'POSTAGE' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'STATIONERY' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode NOT IN ('TRAVEL','MEAL','FUEL','LODGING','MOBILE','LAUNDRY','OFFICE','POSTAGE','STATIONERY','CONVEYANCE','CASH') THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'CONVEYANCE' THEN @IntAmount ELSE 0 END,
+            CASE WHEN @CategoryCode = 'CASH' THEN @IntAmount ELSE 0 END);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, Amount, CreatedAt)
+        VALUES (@IdempotencyKey, 'expense', @NewExpenseId, @EmployeeCode, @Amount, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewExpenseId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
@@ -1356,16 +1400,17 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_ExpenseReceipt_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.ExpenseReceipt with your real table. Unlike the other push
-    -- procedures, the gateway does not read a result row from this one (it "rides" the parent
-    -- xm.MobileGateway_Expense_Push call — see SqlPushRepository.PushExpenseAsync) and it has no
-    -- @IdempotencyKey of its own; de-duplicate on @AttachmentId if this can be called twice.
-    -- Exactly one of @Url / @ContentBase64 will be supplied, never both.
-    IF NOT EXISTS (SELECT 1 FROM dbo.ExpenseReceipt WHERE AttachmentId = @AttachmentId)
+    -- dbo.VoucherClaimDetails.Attachment exists but only holds opaque comma-separated
+    -- file-storage GUIDs, no room for FileName/MimeType/SizeBytes/Url — so this lands in a new
+    -- dedicated dbo.GatewayExpenseReceipt table instead, de-duplicated on @AttachmentId (this
+    -- procedure has no @IdempotencyKey of its own, per the contract note above). Unlike the
+    -- other push procedures, the gateway does not read a result row from this one.
+    IF NOT EXISTS (SELECT 1 FROM dbo.GatewayExpenseReceipt WHERE AttachmentId = @AttachmentId)
     BEGIN
-        -- TODO: INSERT INTO dbo.ExpenseReceipt (ExpenseId, XinfoExpenseId, AttachmentId,
-        --   FileName, MimeType, SizeBytes, Url, ContentBase64) VALUES (...);
-        SELECT 1; -- placeholder no-op so this stub compiles and runs without erroring
+        INSERT INTO dbo.GatewayExpenseReceipt (ID, ExpenseId, XinfoExpenseId, AttachmentId,
+            FileName, MimeType, SizeBytes, Url, ContentBase64, CreatedAt)
+        VALUES (CAST(NEWID() AS nvarchar(64)), @ExpenseId, @XinfoExpenseId, @AttachmentId,
+            @FileName, @MimeType, @SizeBytes, @Url, @ContentBase64, SYSDATETIMEOFFSET());
     END
 END
 GO
