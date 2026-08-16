@@ -1443,25 +1443,65 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_JourneySummary_Push
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Same idempotency pattern as xm.MobileGateway_Customer_Propose above. Replace
-    -- dbo.JourneySummary with your real table. @AttendanceStatus is informational only — XMobile
-    -- is explicitly not the attendance system of record, please do not pay anyone from it.
-    DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(j.Id AS nvarchar(64))
-    FROM dbo.JourneySummary AS j
-    WHERE j.SourceIdempotencyKey = @IdempotencyKey;
+    -- XInfo has no journey/tracking-coverage table or concept — its closest tables
+    -- (Attendance/AttendanceHistory) are its own punch-clock attendance system, a different
+    -- thing entirely, and the remark above is explicit that XMobile must not be treated as the
+    -- attendance system of record, so this does not write into them. Lands in a new dedicated
+    -- dbo.GatewayJourneySummary table instead. Unlike the other push procedures this one is a
+    -- true upsert keyed on (@EmployeeCode, @LocalDate) — a rep's day can legitimately be
+    -- re-summarized (e.g. a fuller end-of-day pass replacing an earlier partial one) under a
+    -- different @IdempotencyKey, so the idempotency-ledger check alone is not enough; the MERGE
+    -- below is what makes a resubmitted day update in place rather than duplicate.
+    DECLARE @ExistingLedgerId nvarchar(64);
+    SELECT @ExistingLedgerId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
 
-    IF @ExistingId IS NOT NULL
+    IF @ExistingLedgerId IS NOT NULL
     BEGIN
-        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingLedgerId,
                WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
         RETURN;
     END
 
-    -- TODO: insert or upsert (@EmployeeCode, @LocalDate) into your real table.
-    DECLARE @NewId nvarchar(64) = CAST(NEWID() AS nvarchar(64));
+    DECLARE @LocalDateOnly date = CAST(@LocalDate AS date);
+    DECLARE @XinfoId nvarchar(64) = (
+        SELECT XinfoId FROM dbo.GatewayJourneySummary WHERE EmployeeCode = @EmployeeCode AND LocalDate = @LocalDateOnly
+    );
+    IF @XinfoId IS NULL SET @XinfoId = CAST(NEWID() AS nvarchar(64));
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        MERGE dbo.GatewayJourneySummary AS target
+        USING (SELECT @EmployeeCode AS EmployeeCode, @LocalDateOnly AS LocalDate) AS src
+            ON target.EmployeeCode = src.EmployeeCode AND target.LocalDate = src.LocalDate
+        WHEN MATCHED THEN UPDATE SET
+            TourId = @TourId, FirstDepartureAt = @FirstDepartureAt, LastArrivalAt = @LastArrivalAt,
+            TotalDistanceM = @TotalDistanceM, EstimatedDistanceM = @EstimatedDistanceM,
+            DistanceByModeJson = @DistanceByModeJson, TravelTimeS = @TravelTimeS,
+            CustomerTimeS = @CustomerTimeS, VisitsPlanned = @VisitsPlanned,
+            VisitsCompleted = @VisitsCompleted, AnomalyCount = @AnomalyCount,
+            TrackingCoveragePct = @TrackingCoveragePct, AttendanceStatus = @AttendanceStatus,
+            ModifiedAt = @OccurredAt
+        WHEN NOT MATCHED THEN INSERT (XinfoId, EmployeeCode, LocalDate, TourId, FirstDepartureAt,
+            LastArrivalAt, TotalDistanceM, EstimatedDistanceM, DistanceByModeJson, TravelTimeS,
+            CustomerTimeS, VisitsPlanned, VisitsCompleted, AnomalyCount, TrackingCoveragePct,
+            AttendanceStatus, CreatedAt, ModifiedAt)
+        VALUES (@XinfoId, @EmployeeCode, @LocalDateOnly, @TourId, @FirstDepartureAt, @LastArrivalAt,
+            @TotalDistanceM, @EstimatedDistanceM, @DistanceByModeJson, @TravelTimeS, @CustomerTimeS,
+            @VisitsPlanned, @VisitsCompleted, @AnomalyCount, @TrackingCoveragePct, @AttendanceStatus,
+            @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'journey_summary', @XinfoId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @XinfoId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
