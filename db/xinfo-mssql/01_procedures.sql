@@ -510,10 +510,11 @@ BEGIN
     --     row, test rows) so this is a best-effort truncation, not a clean ISO code.
     --   * Source and Competitor: no source column for either (LeadSourceID exists but is
     --     100% unpopulated) — always NULL.
-    --   * XmobileId: XInfo's schema has NO column to store XMobile's own opportunity id at
-    --     all. This isn't just unpopulated today — round-tripping it requires the DBA to add a
-    --     column (or a side-mapping table) before xm.MobileGateway_Opportunity_Upsert can
-    --     write it back. Flagging now since the push side will hit this directly.
+    --   * XmobileId: XInfo's schema has NO column to store XMobile's own opportunity id, so
+    --     xm.MobileGateway_Opportunity_Upsert tracks it in a new dbo.GatewayOpportunityLink
+    --     table instead (also used there for the RepFieldsUpdatedAt staleness check) — read
+    --     back here via a join. Only populated for opportunities that originated from an
+    --     XMobile push; everything else (all 36,991 rows as of this pass) is NULL.
     SELECT TOP (@PageSize)
         XinfoId            = o.ID,
         CustomerXinfoId    = o.AccountID,
@@ -532,12 +533,13 @@ BEGIN
         ClosedAt           = TODATETIMEOFFSET(CAST(COALESCE(o.CloseWonApprovedDate, o.CloseLostDate) AS datetime), '+05:30'),
         CloseReasonCode    = o.RequestForCloseLostReason,
         ActualValue        = o.OrderAmount,
-        XmobileId          = CAST(NULL AS uniqueidentifier),
+        XmobileId          = link.XmobileOpportunityId,
         ModifiedAt         = TODATETIMEOFFSET(o.ModifiedOn, '+05:30')
     FROM dbo.Opportunities o
     LEFT JOIN dbo.Currencies cur ON cur.ID = o.Currencyid AND cur.IsDeleted = 0
     LEFT JOIN dbo.OpportunityCloseProbabilities prob ON prob.ID = o.OppStage
     LEFT JOIN XStudio_Configuration.dbo.XStudio_User_Mst_Tbl u ON u.ID = o.AssignedUserID
+    LEFT JOIN dbo.GatewayOpportunityLink link ON link.XinfoId = o.ID
     WHERE o.Name IS NOT NULL AND o.AccountID IS NOT NULL
       AND (@ModifiedSince IS NULL OR o.ModifiedOn >= @ModifiedSince)
       AND (
@@ -1025,36 +1027,85 @@ CREATE OR ALTER PROCEDURE xm.MobileGateway_Opportunity_Upsert
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- [XInfo-DBA-TODO] Replace dbo.Opportunity with your real table. Two rules from the remark
-    -- above, both worth keeping even while this is a stub:
-    --   1. idempotency on @IdempotencyKey, same pattern as xm.MobileGateway_Customer_Propose;
-    --   2. if @XinfoId already exists and its RepFieldsUpdatedAt is NEWER than the incoming
-    --      @RepFieldsUpdatedAt, THROW 50002 rather than applying the update — see below.
+    -- Same idempotency pattern as xm.MobileGateway_Customer_Propose. dbo.Opportunities has
+    -- neither a RepFieldsUpdatedAt column (needed for the staleness-rejection rule below) nor
+    -- anywhere to store @XmobileOpportunityId (the gap flagged in
+    -- xm.MobileGateway_Opportunities_GetChanged) — both are tracked in a new
+    -- dbo.GatewayOpportunityLink table instead, which Opportunities_GetChanged now also reads
+    -- to populate XmobileId. @ProbabilityPct and @Competitor are accepted but not persisted:
+    -- Opportunities has no Competitor column at all, and the only probability-shaped column
+    -- (OppStage) is a GUID pointing at a fixed stage+probability lookup row, not a freely
+    -- settable percentage — the pull side already documents this same asymmetry.
+    DECLARE @ExistingLedgerId nvarchar(64);
+    SELECT @ExistingLedgerId = XinfoId FROM dbo.GatewayIdempotencyLedger WHERE IdempotencyKey = @IdempotencyKey;
+
+    IF @ExistingLedgerId IS NOT NULL
+    BEGIN
+        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingLedgerId,
+               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
+        RETURN;
+    END
+
     IF @XinfoId IS NOT NULL AND EXISTS (
-        SELECT 1 FROM dbo.Opportunity AS o
-        WHERE o.Id = @XinfoId AND o.RepFieldsUpdatedAt > @RepFieldsUpdatedAt
+        SELECT 1 FROM dbo.GatewayOpportunityLink l
+        WHERE l.XinfoId = @XinfoId AND l.RepFieldsUpdatedAt > @RepFieldsUpdatedAt
     )
     BEGIN
         THROW 50002, 'A newer update already exists in XInfo for this opportunity', 1;
     END
 
-    DECLARE @ExistingId nvarchar(64);
-    SELECT @ExistingId = CAST(o.Id AS nvarchar(64))
-    FROM dbo.Opportunity AS o
-    WHERE o.SourceIdempotencyKey = @IdempotencyKey;
-
-    IF @ExistingId IS NOT NULL
+    IF @XinfoId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.Opportunities WHERE ID = @XinfoId)
     BEGIN
-        SELECT Accepted = CAST(1 AS bit), XinfoId = @ExistingId,
-               WasDuplicate = CAST(1 AS bit), Message = CAST(NULL AS nvarchar(400));
-        RETURN;
+        THROW 50004, 'XinfoId does not exist', 1;
     END
 
-    -- TODO: insert or update dbo.Opportunity, keyed on @XinfoId when supplied, else create new
-    -- and record @XmobileOpportunityId so xm.MobileGateway_Opportunities_GetChanged can return it as XmobileId.
-    DECLARE @NewId nvarchar(64) = COALESCE(@XinfoId, CAST(NEWID() AS nvarchar(64)));
+    IF NOT EXISTS (SELECT 1 FROM dbo.Accounts WHERE ID = @CustomerXinfoId)
+    BEGIN
+        THROW 50004, 'CustomerXinfoId does not exist', 1;
+    END
 
-    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewId,
+    DECLARE @NewOppId nvarchar(64) = COALESCE(@XinfoId, CAST(NEWID() AS nvarchar(64)));
+    DECLARE @AssignedUserId nvarchar(64) = (SELECT TOP 1 ID FROM XStudio_Configuration.dbo.XStudio_User_Mst_Tbl WHERE Name = @EmployeeCode);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @XinfoId IS NULL
+        BEGIN
+            INSERT INTO dbo.Opportunities (ID, Name, Description, AccountID, Status, Amount,
+                ExpectedcloseDate, OrderAmount, RequestForCloseLostReason, AssignedUserID,
+                IsDeleted, Source, CreatedOn, ModifiedOn)
+            VALUES (@NewOppId, @Title, @Description, @CustomerXinfoId, @StageCode, @EstimatedValue,
+                CAST(@ExpectedCloseDate AS date), @ActualValue, @CloseReasonCode, @AssignedUserId,
+                0, 'XMobile', @OccurredAt, @OccurredAt);
+        END
+        ELSE
+        BEGIN
+            UPDATE dbo.Opportunities
+            SET Name = @Title, Description = @Description, Status = @StageCode,
+                Amount = @EstimatedValue, ExpectedcloseDate = CAST(@ExpectedCloseDate AS date),
+                OrderAmount = @ActualValue, RequestForCloseLostReason = @CloseReasonCode,
+                ModifiedOn = @OccurredAt
+            WHERE ID = @NewOppId;
+        END
+
+        MERGE dbo.GatewayOpportunityLink AS target
+        USING (SELECT @NewOppId AS XinfoId) AS src ON target.XinfoId = src.XinfoId
+        WHEN MATCHED THEN UPDATE SET RepFieldsUpdatedAt = @RepFieldsUpdatedAt, ModifiedAt = @OccurredAt
+        WHEN NOT MATCHED THEN INSERT (XinfoId, XmobileOpportunityId, RepFieldsUpdatedAt, CreatedAt, ModifiedAt)
+            VALUES (@NewOppId, @XmobileOpportunityId, @RepFieldsUpdatedAt, @OccurredAt, @OccurredAt);
+
+        INSERT INTO dbo.GatewayIdempotencyLedger (IdempotencyKey, Entity, XinfoId, EmployeeCode, CreatedAt)
+        VALUES (@IdempotencyKey, 'opportunity', @NewOppId, @EmployeeCode, @OccurredAt);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+
+    SELECT Accepted = CAST(1 AS bit), XinfoId = @NewOppId,
            WasDuplicate = CAST(0 AS bit), Message = CAST(NULL AS nvarchar(400));
 END
 GO
